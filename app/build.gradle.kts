@@ -13,8 +13,8 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = 36
-        versionCode = 187
-        versionName = "1.1.3"
+        versionCode = 188
+        versionName = "1.1.4"
 
         externalNativeBuild {
             cmake {

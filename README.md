@@ -171,8 +171,8 @@ export ANDROID_HOME=/path/to/android-sdk
 
 ## 版本
 
-- versionName：**1.1.3**
-- versionCode：**187**
+- versionName：**1.1.4**
+- versionCode：**188**
 - applicationId：`com.luminaauth`
 
 ## 开源协议
