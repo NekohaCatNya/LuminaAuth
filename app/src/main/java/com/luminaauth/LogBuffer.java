@@ -7,21 +7,20 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Machine-oriented in-memory ring buffer (compact ASCII, AI/parser friendly).
- *
- * Line schema:  HH:mm:ss.SSS TAG event [k=v ...]
- * - run log  -> add(..)        cap 300
- * - detail   -> addDetail(..)  cap 1000
- *
- * Rules: no human prose, no CJK, booleans as 1/0, free-text fields last.
- * Storage is process-scoped only; everything is dropped on process death.
+ * 高性能日志缓冲
+ * Native C++ 环形缓冲（O(1) 插入，无数组移动）
+ * 如果 native 库不可用，自动 fallback 到 Java 实现
  */
 public class LogBuffer {
     private static final int MAX_ENTRIES = 300;
     private static final int DETAIL_MAX_ENTRIES = 1000;
     private static final int MAX_LINE_LENGTH = 512;
+    private static final SimpleDateFormat SDF = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
+
+    // Java fallback 实现
     private static final List<String> logs = new ArrayList<>();
     private static final List<String> detailLogs = new ArrayList<>();
+
     private static LogListener listener;
 
     public interface LogListener {
@@ -33,7 +32,7 @@ public class LogBuffer {
     }
 
     private static String format(String tag, String message) {
-        String ts = new SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(new Date());
+        String ts = SDF.format(new Date());
         String line = ts + " " + tag + " " + message;
         if (line.length() > MAX_LINE_LENGTH) {
             line = line.substring(0, MAX_LINE_LENGTH);
@@ -41,53 +40,69 @@ public class LogBuffer {
         return line;
     }
 
-    public static synchronized void add(String tag, String message) {
-        logs.add(format(tag, message));
-        if (logs.size() > MAX_ENTRIES) {
-            logs.remove(0);
+    public static void add(String tag, String message) {
+        String line = format(tag, message);
+        if (NativeBridge.isNativeAvailable()) {
+            NativeBridge.nativeAddLog(line, false);
+        } else {
+            synchronized (logs) {
+                logs.add(line);
+                if (logs.size() > MAX_ENTRIES) logs.remove(0);
+            }
         }
-        if (listener != null) {
-            listener.onLogUpdated();
-        }
+        if (listener != null) listener.onLogUpdated();
     }
 
-    public static synchronized void addDetail(String tag, String message) {
-        detailLogs.add(format(tag, message));
-        if (detailLogs.size() > DETAIL_MAX_ENTRIES) {
-            detailLogs.remove(0);
+    public static void addDetail(String tag, String message) {
+        String line = format(tag, message);
+        if (NativeBridge.isNativeAvailable()) {
+            NativeBridge.nativeAddLog(line, true);
+        } else {
+            synchronized (detailLogs) {
+                detailLogs.add(line);
+                if (detailLogs.size() > DETAIL_MAX_ENTRIES) detailLogs.remove(0);
+            }
         }
-        if (listener != null) {
-            listener.onLogUpdated();
-        }
+        if (listener != null) listener.onLogUpdated();
     }
 
-    public static synchronized String getAllText() {
+    public static String getAllText() {
+        if (NativeBridge.isNativeAvailable()) {
+            return NativeBridge.nativeGetAllText(false);
+        }
         StringBuilder sb = new StringBuilder();
-        for (String line : logs) {
-            sb.append(line).append('\n');
+        synchronized (logs) {
+            for (String line : logs) sb.append(line).append('\n');
         }
         return sb.toString();
     }
 
-    public static synchronized String getDetailAllText() {
+    public static String getDetailAllText() {
+        if (NativeBridge.isNativeAvailable()) {
+            return NativeBridge.nativeGetAllText(true);
+        }
         StringBuilder sb = new StringBuilder();
-        for (String line : detailLogs) {
-            sb.append(line).append('\n');
+        synchronized (detailLogs) {
+            for (String line : detailLogs) sb.append(line).append('\n');
         }
         return sb.toString();
     }
 
-    public static synchronized void clear() {
-        logs.clear();
-        if (listener != null) {
-            listener.onLogUpdated();
+    public static void clear() {
+        if (NativeBridge.isNativeAvailable()) {
+            NativeBridge.nativeClear(false);
+        } else {
+            synchronized (logs) { logs.clear(); }
         }
+        if (listener != null) listener.onLogUpdated();
     }
 
-    public static synchronized void clearDetail() {
-        detailLogs.clear();
-        if (listener != null) {
-            listener.onLogUpdated();
+    public static void clearDetail() {
+        if (NativeBridge.isNativeAvailable()) {
+            NativeBridge.nativeClear(true);
+        } else {
+            synchronized (detailLogs) { detailLogs.clear(); }
         }
+        if (listener != null) listener.onLogUpdated();
     }
 }

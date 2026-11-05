@@ -32,7 +32,7 @@
 
 ## 下载
 
-前往 [Releases](https://github.com/Changeiqjh/LuminaAuth/releases) 下载最新的 `LuminaAuth-*-release.apk` 安装即可。应用已使用固定 release 证书签名，可直接覆盖升级。
+前往 [Releases](https://github.com/NekohaCatNya/LuminaAuth/releases) 下载最新的 `LuminaAuth-*-release.apk` 安装即可。应用已使用固定 release 证书签名，可直接覆盖升级。
 
 ## 使用方法
 
@@ -172,7 +172,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.3**
-- versionCode：**162**
+- versionCode：**187**
 - applicationId：`com.luminaauth`
 
 ## 开源协议

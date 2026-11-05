@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 开机自启（无 root 环境下被杀后恢复的关键） -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 应用内更新：安装下载好的 APK 必需 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- 覆盖 miuix-blur 的 minSdk 33 要求：安卓 10-12 可安装运行，但玻璃效果需 API 33+ -->
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
@@ -84,6 +86,17 @@
         <service
             android:name=".ShellUserService"
             android:exported="false" />
+
+        <!-- 应用内更新：把下载好的 APK 通过 content:// 交给系统安装器 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
         <!-- 通知检测模式：监听校园网关认证/下线通知，捕获到立即触发会话探测 -->
         <service

@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -62,6 +63,8 @@ import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Close
@@ -70,6 +73,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import com.luminaauth.theme.LuminaAuthTheme
 import com.luminaauth.theme.LocalAppColors
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtils
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 class AdvancedSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,13 +143,15 @@ private fun AdvancedSettingsScreen(onBack: () -> Unit) {
                 },
             )
         },
-        popupHost = { },
+        popupHost = { MiuixPopupUtils.MiuixPopupHost() },
         containerColor = colorScheme.background,
     ) { innerPadding ->
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
+                // 滑到顶 / 滑到底的触感（与滑块撞到头同款）
+                .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
                 .padding(innerPadding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
         ) {
@@ -354,154 +361,71 @@ private fun AdvancedSettingsScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(40.dp))
             }
         }
-    }
 
-    // 恢复 SSID 确认对话框（底部弹出）
-    AnimatedVisibility(
-        visible = showResetSsidDialog,
-        enter = fadeIn(),
-        exit = fadeOut()
+    // 恢复 SSID 确认对话框（Miuix 原生 OverlayDialog）
+    OverlayDialog(
+        show = showResetSsidDialog,
+        title = "确认恢复",
+        summary = "确定要恢复默认 SSID 列表吗？当前自定义的 SSID 将被清除。",
+        onDismissRequest = { showResetSsidDialog = false },
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { showResetSsidDialog = false },
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateEnterExit(
-                        enter = slideInVertically(initialOffsetY = { it }),
-                        exit = slideOutVertically(targetOffsetY = { it })
-                    ),
-                colors = CardDefaults.defaultColors(colorScheme.surface, Color.Transparent)
-            ) {
-                Column(Modifier.padding(24.dp)) {
-                    Text("确认恢复", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
-                    Spacer(Modifier.height(12.dp))
-                    Text("确定要恢复默认 SSID 列表吗？当前自定义的 SSID 将被清除。", fontSize = 14.sp, color = colorScheme.onSurfaceContainerVariant, lineHeight = 20.sp)
-                    Spacer(Modifier.height(24.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ActionButton(
-                            text = "取消",
-                            color = colorScheme.onSurface,
-                            onClick = { showResetSsidDialog = false },
-                            modifier = Modifier.weight(1f)
-                        )
-                        ActionButton(
-                            text = "确定",
-                            color = appColors.danger,
-                            onClick = {
-                                PrefUtils.resetSsidList(AppContext.get())
-                                refreshList()
-                                // SSID 列表变更：重新评估当前网络
-                                AuthGlobalState.setStatus(AuthStatus.NEED_AUTH)
-                                showResetSsidDialog = false
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(
+                text = "取消",
+                onClick = { showResetSsidDialog = false },
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                text = "确定",
+                               onClick = {
+                    PrefUtils.resetSsidList(AppContext.get())
+                    refreshList()
+                    AuthGlobalState.setStatus(AuthStatus.NEED_AUTH)
+                    showResetSsidDialog = false
+                },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 
-    // 恢复登录地址确认对话框（底部弹出）
-    AnimatedVisibility(
-        visible = showResetUrlDialog,
-        enter = fadeIn(),
-        exit = fadeOut()
+    // 恢复登录地址确认对话框（Miuix 原生 OverlayDialog）
+    OverlayDialog(
+        show = showResetUrlDialog,
+        title = "确认恢复",
+        summary = "确定要恢复默认登录地址吗？当前自定义的地址将被清除。",
+        onDismissRequest = { showResetUrlDialog = false },
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { showResetUrlDialog = false },
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateEnterExit(
-                        enter = slideInVertically(initialOffsetY = { it }),
-                        exit = slideOutVertically(targetOffsetY = { it })
-                    ),
-                colors = CardDefaults.defaultColors(colorScheme.surface, Color.Transparent)
-            ) {
-                Column(Modifier.padding(24.dp)) {
-                    Text("确认恢复", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colorScheme.onSurface)
-                    Spacer(Modifier.height(12.dp))
-                    Text("确定要恢复默认登录地址吗？当前自定义的地址将被清除。", fontSize = 14.sp, color = colorScheme.onSurfaceContainerVariant, lineHeight = 20.sp)
-                    Spacer(Modifier.height(24.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ActionButton(
-                            text = "取消",
-                            color = colorScheme.onSurface,
-                            onClick = { showResetUrlDialog = false },
-                            modifier = Modifier.weight(1f)
-                        )
-                        ActionButton(
-                            text = "确定",
-                            color = appColors.danger,
-                            onClick = {
-                                PrefUtils.resetLoginUrl(AppContext.get())
-                                customAuthUrl = ""
-                                showResetUrlDialog = false
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(
+                text = "取消",
+                onClick = { showResetUrlDialog = false },
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                text = "确定",
+                onClick = {
+                    PrefUtils.resetLoginUrl(AppContext.get())
+                    customAuthUrl = ""
+                    showResetUrlDialog = false
+                },
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 
-    // 插件解析失败详情对话框（底部弹出）
-    AnimatedVisibility(
-        visible = pluginImportError != null,
-        enter = fadeIn(),
-        exit = fadeOut()
+    // 插件导入失败详情对话框（Miuix 原生 OverlayDialog）
+    OverlayDialog(
+        show = pluginImportError != null,
+        title = "插件导入失败",
+        summary = pluginImportError ?: "",
+        onDismissRequest = { pluginImportError = null },
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { pluginImportError = null },
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateEnterExit(
-                        enter = slideInVertically(initialOffsetY = { it }),
-                        exit = slideOutVertically(targetOffsetY = { it })
-                    ),
-                colors = CardDefaults.defaultColors(colorScheme.surface, Color.Transparent)
-            ) {
-                Column(Modifier.padding(24.dp)) {
-                    Text("插件导入失败", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = appColors.danger)
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        pluginImportError ?: "",
-                        fontSize = 13.sp,
-                        color = colorScheme.onSurfaceContainerVariant,
-                        lineHeight = 20.sp
-                    )
-                    Spacer(Modifier.height(24.dp))
-                    ActionButton(
-                        text = "关闭",
-                        color = appColors.danger,
-                        onClick = { pluginImportError = null },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-        }
+        TextButton(
+            text = "关闭",
+            onClick = { pluginImportError = null },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
     }
 }
 

@@ -1,6 +1,7 @@
 package com.luminaauth
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.MutatorMutex
 import androidx.compose.runtime.snapshotFlow
@@ -28,8 +29,18 @@ class DampedDragAnimation(
     val onDrag: DampedDragAnimation.(size: IntSize, dragAmount: Offset) -> Unit,
 ) {
 
-    private val valueAnimationSpec =
-        spring(1f, 1000f, visibilityThreshold)
+    // 跟随动画取 Miuix 官方 Slider 的参数：
+    // - 静止时 spring(dampingRatio = 0.96, stiffness = 322)：数值一变，thumb 带一点过冲地「轻微跟随」过去；
+    // - 按压/拖动时 spring(0.9, 1755)：更紧、更跟手，松开后回弹到位。
+    private val valueAnimationSpecIdle =
+        spring(0.96f, 322f, visibilityThreshold)
+    private val valueAnimationSpecPressed =
+        spring(0.9f, 1755f, visibilityThreshold)
+
+    /** 按当前按压进度挑选跟随 spec（拖动中走紧致档，静止走轻跟随档） */
+    private fun currentValueSpec(): SpringSpec<Float> =
+        if (pressProgress > 0.001f) valueAnimationSpecPressed else valueAnimationSpecIdle
+
     private val velocityAnimationSpec =
         spring(0.5f, 300f, visibilityThreshold * 10f)
     private val pressProgressAnimationSpec =
@@ -115,7 +126,7 @@ class DampedDragAnimation(
     fun updateValue(value: Float) {
         val targetValue = value.coerceIn(valueRange)
         animationScope.launch {
-            launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) { updateVelocity() } }
+            launch { valueAnimation.animateTo(targetValue, currentValueSpec()) { updateVelocity() } }
         }
     }
 
@@ -133,7 +144,7 @@ class DampedDragAnimation(
             mutatorMutex.mutate {
                 press()
                 val targetValue = value.coerceIn(valueRange)
-                launch { valueAnimation.animateTo(targetValue, valueAnimationSpec) }
+                launch { valueAnimation.animateTo(targetValue, currentValueSpec()) }
                 if (velocity != 0f) {
                     launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
                 }

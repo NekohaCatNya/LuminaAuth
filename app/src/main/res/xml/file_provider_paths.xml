@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 应用内更新 APK 落地目录 -->
+    <external-cache-path name="update_apk" path="." />
+    <cache-path name="update_apk_cache" path="." />
+</paths>

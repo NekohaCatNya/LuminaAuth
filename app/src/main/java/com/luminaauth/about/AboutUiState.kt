@@ -7,7 +7,8 @@ data class AboutUiState(
     val title: String,
     val appName: String,
     val versionName: String,
-    val links: List<LinkInfo>,
+    val infoItems: List<InfoItem>,
+    val openSourceItems: List<OpenSourceItem>,
 )
 
 @Immutable
@@ -17,7 +18,15 @@ data class AboutScreenActions(
 )
 
 @Immutable
-data class LinkInfo(
-    val fullText: String,
-    val url: String
+data class InfoItem(
+    val label: String,
+    val value: String
+)
+
+@Immutable
+data class OpenSourceItem(
+    val name: String,
+    val description: String,
+    val url: String,
+    val iconRes: Int = 0
 )

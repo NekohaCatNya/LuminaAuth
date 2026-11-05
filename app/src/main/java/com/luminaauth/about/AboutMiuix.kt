@@ -42,6 +42,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalContext
+import com.luminaauth.R
+import com.luminaauth.UpdateChecker
+import java.io.File
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.runtime.getValue
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -59,7 +78,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.onEach
-import com.luminaauth.R
 import com.luminaauth.abouteffect.BgEffectBackground
 import com.luminaauth.abouteffect.ColorBlendToken
 import com.luminaauth.abouteffect.LocalEnableBlur
@@ -70,6 +88,10 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
@@ -361,7 +383,7 @@ private fun AboutContent(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
-                .scrollEndHaptic()
+                .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
                 .overScrollVertical()
                 .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
@@ -417,18 +439,276 @@ private fun AboutContent(
                             Color.Transparent,
                         ),
                     ) {
-                        state.links.forEach {
+                        state.infoItems.forEachIndexed { index, item ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { actions.onOpenLink(it.url) }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(it.fullText, fontSize = 15.sp, color = colorScheme.onSurface)
+                                Text(item.label, fontSize = 15.sp, color = colorScheme.onSurface)
+                                Spacer(Modifier.weight(1f))
+                                Text(item.value, fontSize = 14.sp, color = colorScheme.onSurfaceVariantSummary)
+                            }
+                            if (index < state.infoItems.size - 1) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp)
+                                        .height(0.5.dp)
+                                        .background(colorScheme.onSurface.copy(alpha = 0.1f))
+                                )
                             }
                         }
                     }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .then(
+                                if (enableBlur) {
+                                    Modifier.textureBlur(
+                                        backdrop = backdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = 60f,
+                                        colors = BlurColors(blendColors = blendColors),
+                                        enabled = true,
+                                    )
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (enableBlur) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        state.openSourceItems.forEachIndexed { index, item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { actions.onOpenLink(item.url) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = item.iconRes),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                                Spacer(Modifier.size(16.dp))
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(item.name, fontSize = 15.sp, color = colorScheme.onSurface)
+                                    Text(item.description, fontSize = 12.sp, color = colorScheme.onSurfaceVariantSummary)
+                                }
+                                Text(
+                                    text = "›",
+                                    fontSize = 20.sp,
+                                    color = colorScheme.onSurfaceVariantSummary
+                                )
+                            }
+                            if (index < state.openSourceItems.size - 1) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 72.dp)
+                                        .height(0.5.dp)
+                                        .background(colorScheme.onSurface.copy(alpha = 0.1f))
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // GitHub 开源地址 + 检查更新
+                    val context = LocalContext.current
+                    val currentVersion = remember {
+                        runCatching {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                        }.getOrNull().orEmpty()
+                    }
+                    var updateState by remember { mutableStateOf<UpdateUi>(UpdateUi.Checking) }
+                    LaunchedEffect(Unit) {
+                        val rel = UpdateChecker.checkLatest(currentVersion)
+                        updateState = if (rel != null) UpdateUi.Available(rel) else UpdateUi.UpToDate
+                    }
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .then(
+                                if (enableBlur) {
+                                    Modifier.textureBlur(
+                                        backdrop = backdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = 60f,
+                                        colors = BlurColors(blendColors = blendColors),
+                                        enabled = true,
+                                    )
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (enableBlur) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        // GitHub 开源地址行
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { actions.onOpenLink(UpdateChecker.REPO_URL) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_github),
+                                    contentDescription = null,
+                                    tint = colorScheme.onSurface,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(Modifier.size(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("GitHub 开源地址", fontSize = 15.sp, color = colorScheme.onSurface)
+                                Text(
+                                    "github.com/NekohaCatNya/LuminaAuth",
+                                    fontSize = 12.sp,
+                                    color = colorScheme.onSurfaceVariantSummary
+                                )
+                            }
+                            Text("›", fontSize = 20.sp, color = colorScheme.onSurfaceVariantSummary)
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .then(
+                                if (enableBlur) {
+                                    Modifier.textureBlur(
+                                        backdrop = backdrop,
+                                        shape = RoundedCornerShape(16.dp),
+                                        blurRadius = 60f,
+                                        colors = BlurColors(blendColors = blendColors),
+                                        enabled = true,
+                                    )
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.defaultColors(
+                            if (enableBlur) Color.Transparent else colorScheme.surfaceContainer,
+                            Color.Transparent,
+                        ),
+                    ) {
+                        Column(modifier = Modifier.animateContentSize()) {
+                            // 主行：固定 56dp 高，右侧控件位置完全固定
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(56.dp)
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("检查更新", fontSize = 15.sp, color = colorScheme.onSurface)
+                                Spacer(Modifier.weight(1f))
+                                // Crossfade 自带固定尺寸，内容全部居中，加载圈和按钮位置完全重合
+                                Crossfade(
+                                    targetState = updateState,
+                                    modifier = Modifier.size(width = 88.dp, height = 32.dp),
+                                    label = "updateState",
+                                    animationSpec = tween(durationMillis = 400)
+                                ) { st ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        when (st) {
+                                            is UpdateUi.Checking -> InfiniteProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                color = colorScheme.primary
+                                            )
+                                            is UpdateUi.UpToDate -> UpdateActionButton(
+                                                text = "无更新",
+                                                accent = colorScheme.onSurfaceVariantSummary,
+                                                enabled = false,
+                                                onClick = {}
+                                            )
+                                            is UpdateUi.Available -> UpdateActionButton(
+                                                text = "更新",
+                                                accent = Color(0xFF4CAF50),
+                                                enabled = true,
+                                                onClick = {
+                                                    val rel = st.rel
+                                                    val dest = File(context.externalCacheDir, "update.apk")
+                                                    UpdateChecker.startDownload(
+                                                        url = rel.apkUrl,
+                                                        dest = dest,
+                                                        onProgress = { done, total ->
+                                                            updateState = UpdateUi.Downloading(rel, done, total)
+                                                        },
+                                                        onDone = { f ->
+                                                            updateState = UpdateUi.Installing
+                                                            UpdateChecker.install(context, f)
+                                                        },
+                                                        onError = { updateState = UpdateUi.Available(rel) },
+                                                    )
+                                                }
+                                            )
+                                            is UpdateUi.Downloading -> Unit
+                                            is UpdateUi.Installing -> Unit
+                                        }
+                                    }
+                                }
+                            }
+                            // 下载进度行：仅下载时向下展开，淡入
+                            AnimatedVisibility(visible = updateState is UpdateUi.Downloading || updateState is UpdateUi.Installing) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    when (val st = updateState) {
+                                        is UpdateUi.Downloading -> {
+                                            LinearProgressIndicator(
+                                                progress = if (st.total > 0) st.done.toFloat() / st.total else 0f,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                "${(if (st.total > 0) (st.done * 100 / st.total) else 0)}%",
+                                                fontSize = 12.sp,
+                                                color = colorScheme.onSurfaceVariantSummary
+                                            )
+                                        }
+                                        is UpdateUi.Installing -> Text(
+                                            "安装中…",
+                                            fontSize = 12.sp,
+                                            color = colorScheme.onSurfaceVariantSummary
+                                        )
+                                        else -> {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(
                         Modifier.height(
                             WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() +
@@ -438,5 +718,39 @@ private fun AboutContent(
                 }
             }
         }
+    }
+}
+
+// 检查更新的 UI 状态
+private sealed interface UpdateUi {
+    data object Checking : UpdateUi
+    data object UpToDate : UpdateUi
+    data class Available(val rel: UpdateChecker.Release) : UpdateUi
+    data class Downloading(val rel: UpdateChecker.Release, val done: Long, val total: Long) : UpdateUi
+    data object Installing : UpdateUi
+}
+
+/** 与设置页「去开启 / 已开启」按钮一致：自动高、14/7dp 内边距、12dp 圆角、12% 同色底、13sp 中等字重 */
+@Composable
+private fun UpdateActionButton(
+    text: String,
+    accent: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = if (enabled) 0.12f else 0.06f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text,
+            color = accent.copy(alpha = if (enabled) 1f else 0.55f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }

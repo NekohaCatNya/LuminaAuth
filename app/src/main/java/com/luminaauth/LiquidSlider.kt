@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -27,9 +28,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -61,14 +64,38 @@ fun LiquidSlider(
     enabled: Boolean = true,
     // 松手时的值吸附（如等待时间吸附到整数秒）；与当前值不同时带动画回弹
     valueSnap: (Float) -> Float = { it },
+    // 触感反馈：跨过一个步进就轻震一下（Miuix Slider 同款 TextHandleMove）；
+    // 0 表示关闭。传 0.1 表示每 0.1 秒一次，传 1f 表示每 1 秒一次
+    hapticStep: Float = 0f,
 ) {
+    val haptic = LocalHapticFeedback.current
+    // 上一次震动时的步进序号；跨步才震，避免每帧连震（Miuix 用 0.005 里程阈值，这里按显示步长量化）
+    var lastHapticTick by remember { mutableIntStateOf(Int.MIN_VALUE) }
+    // 是否正贴在 min / max 两端：只在「进入边缘」那一刻震一次 GestureThresholdActivate
+    var atEdge by remember { mutableStateOf(false) }
+
+    /** 数值变化时的触感：跨步轻震（TextHandleMove）+ 撞到两端震一次（GestureThresholdActivate） */
+    fun updateHaptics(v: Float) {
+        if (hapticStep > 0f) {
+            val tick = (v / hapticStep).fastRoundToInt()
+            if (lastHapticTick != Int.MIN_VALUE && tick != lastHapticTick) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            lastHapticTick = tick
+        }
+        val edgeNow = v <= valueRange.start || v >= valueRange.endInclusive
+        if (edgeNow && !atEdge) {
+            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+        }
+        atEdge = edgeNow
+    }
     // 跟随应用主题（跟随系统/浅色/深色）：
     // 跟随系统时用系统深浅兜底，浅色/深色时用应用内设置
     val context = LocalContext.current
     val isLightTheme = (ThemeUtils.getIsDark(context) ?: isSystemInDarkTheme()) != true
     val appColors = LocalAppColors.current
     // 禁用时已填充轨道用轨道灰色
-    val accentColor = appColors.controlAccent
+    val accentColor = if (enabled) appColors.controlAccent else appColors.controlTrack
     val trackColor = appColors.controlTrack.copy(alpha = if (isLightTheme) 0.2f else 0.36f)
     val trackBackdrop = rememberLayerBackdrop()
     BoxWithConstraints(modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -110,6 +137,7 @@ fun LiquidSlider(
                                 .fastCoerceIn(valueRange.start, valueRange.endInclusive)
                             damped.animateToValue(targetValue)
                             onValueChange(targetValue)
+                            updateHaptics(targetValue)
                         }
                     }
                     .height(6f.dp)
@@ -140,6 +168,10 @@ fun LiquidSlider(
                         onDragStart = {
                             // touch slop + 水平方向确认后才触发，不会按下即锁死页面
                             isDragging = true
+                            // 以按下时的位置为基准，拖动中不会一碰就震
+                            lastHapticTick =
+                                if (hapticStep > 0f) (damped.value / hapticStep).fastRoundToInt() else Int.MIN_VALUE
+                            atEdge = damped.value <= valueRange.start || damped.value >= valueRange.endInclusive
                             damped.press()
                             onDragStateChange?.invoke(true)
                             didDrag = false
@@ -171,6 +203,7 @@ fun LiquidSlider(
                             .fastCoerceIn(valueRange.start, valueRange.endInclusive)
                         damped.snapToValue(newValue)
                         onValueChange(newValue)
+                        updateHaptics(newValue)
                     }
                 }
                 .drawBackdrop(
@@ -212,7 +245,10 @@ fun LiquidSlider(
                         scaleY *= 1f - (velocity * 0.25f).fastCoerceIn(-0.2f, 0.2f)
                     },
                     onDrawSurface = {
-                        drawRect(Color.White.copy(alpha = 1f - damped.pressProgress))
+                        drawRect(
+                            if (enabled) Color.White.copy(alpha = 1f - damped.pressProgress)
+                            else appColors.controlTrack
+                        )
                     }
                 )
                 .size(40f.dp, 24f.dp)
