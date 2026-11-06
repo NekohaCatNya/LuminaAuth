@@ -170,6 +170,7 @@ fun AboutScreenMiuix(
     var downloadDone by remember { mutableLongStateOf(0L) }
     var downloadTotal by remember { mutableLongStateOf(0L) }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             BlurredBar(backdrop = barBlurBackdrop, blurActive = blurActive) {
@@ -198,110 +199,7 @@ fun AboutScreenMiuix(
                 )
             }
         },
-        popupHost = {
-            // 更新对话框放在 popupHost 里才能弹出
-            if (showUpdateDialog && updateState is UpdateUi.Available) {
-                val rel = (updateState as UpdateUi.Available).rel
-                LaunchedEffect(showUpdateDialog) {
-                    if (showUpdateDialog && dialogPhase == DialogPhase.Loading) {
-                        kotlinx.coroutines.delay(600)
-                        dialogPhase = DialogPhase.Notes
-                    }
-                }
-                OverlayDialog(
-                    show = showUpdateDialog,
-                    title = "更新说明",
-                    summary = "",
-                    onDismissRequest = { showUpdateDialog = false },
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Crossfade(
-                            targetState = dialogPhase,
-                            animationSpec = tween(durationMillis = 300),
-                            label = "dialogPhase"
-                        ) { phase ->
-                            when (phase) {
-                                DialogPhase.Loading -> Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(120.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    InfiniteProgressIndicator(
-                                        modifier = Modifier.size(28.dp),
-                                        color = colorScheme.primary
-                                    )
-                                }
-                                DialogPhase.Notes -> Column {
-                                    val notes = rel.body.ifBlank { "无更新说明" }
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 200.dp)
-                                            .verticalScroll(rememberScrollState())
-                                    ) {
-                                        Text(
-                                            notes,
-                                            fontSize = 13.sp,
-                                            color = colorScheme.onSurfaceVariantSummary,
-                                            modifier = Modifier.padding(vertical = 4.dp)
-                                        )
-                                    }
-                                    Spacer(Modifier.height(16.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        TextButton(
-                                            text = "取消",
-                                            onClick = { showUpdateDialog = false },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        TextButton(
-                                            text = "确定",
-                                            onClick = {
-                                                dialogPhase = DialogPhase.Progress
-                                                downloadDone = 0L
-                                                downloadTotal = 0L
-                                                val dest = File(context.externalCacheDir, "update.apk")
-                                                UpdateChecker.startDownload(
-                                                    url = rel.apkUrl,
-                                                    dest = dest,
-                                                    onProgress = { done, total ->
-                                                        downloadDone = done
-                                                        downloadTotal = total
-                                                    },
-                                                    onDone = { f ->
-                                                        UpdateChecker.install(context, f)
-                                                    },
-                                                    onError = {
-                                                        dialogPhase = DialogPhase.Notes
-                                                    },
-                                                )
-                                            },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                                DialogPhase.Progress -> Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
-                                    LinearProgressIndicator(
-                                        progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        "$pct%",
-                                        fontSize = 14.sp,
-                                        color = colorScheme.onSurfaceVariantSummary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
+        popupHost = { },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (barBlurBackdrop != null) Modifier.layerBackdrop(barBlurBackdrop) else Modifier) {
@@ -319,6 +217,110 @@ fun AboutScreenMiuix(
                 onDialogPhaseChange = { dialogPhase = it },
             )
         }
+    }
+
+    // 更新对话框放在 Scaffold 外面、Box 根层级
+    if (showUpdateDialog && updateState is UpdateUi.Available) {
+        val rel = (updateState as UpdateUi.Available).rel
+        LaunchedEffect(showUpdateDialog) {
+            if (showUpdateDialog && dialogPhase == DialogPhase.Loading) {
+                kotlinx.coroutines.delay(600)
+                dialogPhase = DialogPhase.Notes
+            }
+        }
+        OverlayDialog(
+            show = showUpdateDialog,
+            title = "更新说明",
+            summary = "",
+            onDismissRequest = { showUpdateDialog = false },
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Crossfade(
+                    targetState = dialogPhase,
+                    animationSpec = tween(durationMillis = 300),
+                    label = "dialogPhase"
+                ) { phase ->
+                    when (phase) {
+                        DialogPhase.Loading -> Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            InfiniteProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = colorScheme.primary
+                            )
+                        }
+                        DialogPhase.Notes -> Column {
+                            val notes = rel.body.ifBlank { "无更新说明" }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                Text(
+                                    notes,
+                                    fontSize = 13.sp,
+                                    color = colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                TextButton(
+                                    text = "取消",
+                                    onClick = { showUpdateDialog = false },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    text = "确定",
+                                    onClick = {
+                                        dialogPhase = DialogPhase.Progress
+                                        downloadDone = 0L
+                                        downloadTotal = 0L
+                                        val dest = File(context.externalCacheDir, "update.apk")
+                                        UpdateChecker.startDownload(
+                                            url = rel.apkUrl,
+                                            dest = dest,
+                                            onProgress = { done, total ->
+                                                downloadDone = done
+                                                downloadTotal = total
+                                            },
+                                            onDone = { f ->
+                                                UpdateChecker.install(context, f)
+                                            },
+                                            onError = {
+                                                dialogPhase = DialogPhase.Notes
+                                            },
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        DialogPhase.Progress -> Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
+                            LinearProgressIndicator(
+                                progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "$pct%",
+                                fontSize = 14.sp,
+                                color = colorScheme.onSurfaceVariantSummary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
     }
 }
 
