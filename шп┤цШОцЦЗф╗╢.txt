@@ -1,0 +1,54 @@
+# LuminaAuth 项目完整说明文档（给DeepSeek，可直接复制保存�?LuminaAuth_ProjectSpec.txt�?## 基础项目信息
+项目名称：LuminaAuth
+工程根目录名称：SchoolAutologinCompose
+应用包名：com.luminaauth
+技术栈：Kotlin 为主 + 少量遗留 Java；UI 框架 Jetpack Compose；UI 组件�?Miuix（top.yukonga.miuix.kmp 0.9.4）；异步使用 Kotlin Coroutine；网络请求用 JDK HttpURLConnection 原生实现（无 OkHttp）；�?WorkManager，后台任务用前台 Service + BroadcastReceiver
+目标 Android 版本：minSdk 29（Android 10）、targetSdk 36（Android 16）、compileSdk 37
+项目定位：Android校园DrCOM ePortal网页认证自动登录客户端�?核心业务：监听网络状态、监听系统通知，检测校园网下线事件，自动执行网页认证；同时支持用户手动输入账号密码进行登录认证�?UI风格：HyperIsland 风格液态玻璃卡片UI，包含自定义3D滑动条组件�?
+## 历史变更记录（所有已完成修改，不可回退�?1. 全局日志系统：日志输出全部改为纯英文文本，移除所有面向普通用户的自然语言提示，格式精简，面向机器解析，去除冗余文字�?2. 日志页面按钮：原“复制日志”按钮文本修改为“导出”，功能由剪贴板复制改为写入本地文件导出日志�?3. UI清理：删除页面内所有文本提示框组件（Toast内嵌提示文本框）�?4. 代码清理：删除项目内未引用、未使用的冗余代码、废弃函数�?5. 向导页面：删除无效OOBE初始化引导页面相关全部代码�?6. 日志增强：手动登录流程产生的全部请求报文、响应报文、状态事件，完整写入全量日志管理器，和自动登录日志统一存储�?7. 注释维护：修复过程中被改动的注释已恢复为原始注释文本�?8. Compose滑块自定义组件：
+   - 布局：滑块控件与下方相邻控件增加垂直间距，消除紧贴重叠问题�?   - 动画：滑动交互增加弹性q弹动画效果�?   - 交互逻辑：当手指按下滑块按钮时，将滑块按钮长度重置为默认基准长度�?9. 等待时间滑块禁用态标识：设置页「检测速度」卡片内，等待时间滑块不可用时（开启通知检测模式，或设备不支持高斯模糊）叠加黄色边�?+ 黄色「已禁用」文字，随禁用状�?320ms 淡入淡出�?*两者画在模糊层之上，文字与边框不被模糊糊掉**（模糊只作用在「标�?+ 滑块」那一层）�?10. 日志页文本框模糊：日志页「运行日志」「全局详细日志」两个文本框各自在框体顶部、底部加与整页同款的渐进模糊栏（`TopBlurBar` / `BottomBlurBar`，框�?26dp），文字滚动时从框顶、框底模糊中穿过；两个框各用自有 `layerBackdrop`，模糊栏画在捕获层之外避免渲染循环；同页整页级顶 / 底模糊栏已移除�?
+11. 顶部模糊滑动不冻结：日志页、设置页滚动进行（拖拽与惯性滑行）时，顶部渐进模糊不再冻结——backdrop 离屏捕获与每帧采样持续进行，顶部栏始终保持模糊，滚动内容实时从模糊栏下方穿过；移除滚动进行时顶部模糊降级纯色的逻辑（MainActivity.kt 中 effectiveBlur 不再依赖 isScrollInProgress）。
+## 权限与提权现状（重要，与旧版文档相反�?**Root / Shizuku 提权代码仍然保留在项目中，并未删�?*，是「增强模式（root�?（Shizuku）」功能的实现基础。相关代码：
+- `app/build.gradle.kts` 依赖：`dev.rikka.shizuku:api:13.1.5`、`dev.rikka.shizuku:provider:13.1.5`
+- `app/build.gradle.kts` 开�?`buildFeatures { aidl = true }`
+- `app/src/main/AndroidManifest.xml`：`moe.shizuku.manager.permission.API_V23` 权限、`rikka.shizuku.ShizukuProvider`（authorities `${applicationId}.shizuku`）、`.ShellUserService`
+- `app/src/main/java/com/luminaauth/RootUtils.java`、`ShizukuUtils.java`、`ShellUserService.java`、`app/src/main/aidl/com/luminaauth/IShell.aidl`
+不清理这些代码是本项目当前既定状态；如需移除，必须由用户单独下达指令�?
+## 编译&打包硬性规则，必须严格遵守
+1. 版本号规则：无用户单独指定版本号修改指令时，每一次Release编译，versionCode自动+1；versionName字符串保持固定不变�?2. 输出产物：每一次完成代码修改并编译成功�?*必须同时交付两份文件：完整源码压缩包 + Release签名APK安装�?*�?3. Release包体积：控制最终APK大小在约10MB，禁止过度R8压缩、资源压缩导致包体压缩至3MB级别�?4. 构建类型：只构建Release版本，不要Debug构建产物�?
+# 文件清单、文件用途、内部关键代码精准说�?## 1. app/build.gradle.kts
+文件类型：Gradle Kotlin DSL 模块构建脚本，app模块的构建配�?作用：定义APP编译参数、依赖库、签名、混淆规则、SDK版本�?关键代码块说明：
+1. `defaultConfig`：`applicationId = "com.luminaauth"`、`minSdk = 29`、`targetSdk = 36`、`compileSdk = 37`、`multiDexEnabled = true`；`versionCode`每次编译自增，`versionName`固定�?2. `dependencies{}`：Compose（compose-bom 2026.08.00）、Miuix 0.9.4（ui / icons / blur）、Coroutine、shizuku api+provider 13.1.5、kyant0 backdrop 1.0.6 / shapes 1.2.0�?*没有 OkHttp、没�?WorkManager**，网络请求由 `NetworkUtils.java` �?HttpURLConnection 实现�?3. `buildTypes -> release{}`：`isMinifyEnabled = false`、`isShrinkResources = false`，用来控制最终APK体积大小。禁止极致压缩�?4. `signingConfigs`：Release签名配置，自动加�?`../schoolautologin-release.keystore`（alias=schoolautologin）完成签名�?5. `buildFeatures`：`compose = true`、`aidl = true`（aidl �?Shizuku ShellUserService 所需）�?6. `packaging.dex.useLegacyPackaging = true`：压�?dex 控制包体�?
+## 2. settings.gradle.kts
+文件类型：项目根级Gradle配置
+作用：管理项目包含模块、配置Maven远程依赖仓库地址�?关键代码：`pluginManagement{}` 配置插件下载仓库；`dependencyResolutionManagement` �?`RepositoriesMode.FAIL_ON_PROJECT_REPOS` 并声�?google()/mavenCentral()；`include(":app")`�?
+## 3. gradle.properties
+文件类型：全局Gradle属性配�?作用：全局开关与JVM参数，作用于整个项目编译流程�?关键配置：JVM堆内存大小（`org.gradle.jvmargs=-Xmx2560m`）、`org.gradle.workers.max=2`、`org.gradle.parallel=false`�?
+## 4. app/src/main/AndroidManifest.xml
+文件类型：Android系统清单文件，系统识别APP的核心配置文�?作用：声明APP所需权限、四大组件、应用入口、前台服务、广播接收器�?关键节点说明�?1. 权限声明（共9项）：INTERNET、ACCESS_WIFI_STATE、ACCESS_NETWORK_STATE、ACCESS_COARSE_LOCATION、ACCESS_FINE_LOCATION（安�?0+读取WiFi SSID必需）、REQUEST_IGNORE_BATTERY_OPTIMIZATIONS、POST_NOTIFICATIONS、FOREGROUND_SERVICE、FOREGROUND_SERVICE_SPECIAL_USE、RECEIVE_BOOT_COMPLETED，以�?Shizuku �?`moe.shizuku.manager.permission.API_V23`�?2. `<service android:name=".AutoLoginService">`：前台常驻认证服务，`foregroundServiceType="specialUse"`（subtype `campus_network_auto_login`）�?3. `.GatewayNotificationListener`：NotificationListenerService，监听系统通知，捕获校园网下线通知触发会话探测�?4. Activity声明：`.MainActivity`（LAUNCHER）、`.AboutActivity`、`.AdvancedSettingsActivity`、`.theme.ThemeSettingsActivity`�?5. BroadcastReceiver：`.AutoLoginReceiver`（监�?`android.net.wifi.STATE_CHANGE` / `SUPPLICANT_CONNECTION_CHANGE`）、`.BootReceiver`（BOOT_COMPLETED / LOCKED_BOOT_COMPLETED / MY_PACKAGE_REPLACED）�?6. Shizuku 组件：`rikka.shizuku.ShizukuProvider`、`.ShellUserService`�?
+## 5. app/src/main/java/com/luminaauth/MainActivity.kt
+文件类型：Compose页面，APP主界面Activity（单文件内承载主�?/ 日志�?/ 设置页多�?Composable�?作用：应用首页，校园网认证交互主页面�?关键代码逻辑�?1. Compose + Miuix 页面布局，包含ISP下拉选择组件，下拉选项区分教职�?学生账号，对应不同账号后缀参数�?2. 账号、密码输入框；手动登录触发按钮�?3. 手动登录按钮点击事件：调用登录服务发起手动登录流程；**本次手动登录完整请求、响应数据全部提交至日志管理器写入全量日�?*�?4. 状态收集：监听服务状态，实时渲染页面状态卡片，状态枚举：NEED_AUTH（需要认证）、ONLINE（已联网）、OFFLINE（离线）�?5. 设置页「检测速度」卡片：`LiquidSlider` 轮询间隔�?.5s�?0s�? 等待时间滑块�?..15 秒，`enabled = !notifyDetect`）。等待时间滑块禁用态实现：
+   - `waitDisabled = notifyDetect || !blurEnabled`；`waitDisabledAlpha`（Animatable + `tween(320ms, FastOutSlowInEasing)`）作为黄�?文字共用淡入淡出进度
+   - `waitBlur`（仅 `notifyDetect` 触发）驱�?`Modifier.blur(radiusX/Y = 9.dp * waitBlur.value, edgeTreatment = BlurredEdgeTreatment.Unbounded)`
+   - **模糊只加在「标�?+ 滑块」这一�?`Column` �?*；黄框（`drawBehind` + `drawRoundRect(style = Stroke(1.5.dp))`，圆�?16.dp）、淡黄底衬、居中「已禁用」文字（`Color(0xFFFFC107)`）都画在其上层，因此始终清晰不被模糊
+   - 触发：开启通知检测模式淡入，关闭淡出；设备不支持高斯模糊（`blurEnabled == false`）时同样按禁用态显�?
+## 6. app/src/main/java/com/luminaauth/AdvancedSettingsActivity.kt
+文件类型：高级设置页面Activity
+作用：承载APP高级配置项，独立主题调色板页面入口、日志相关配置�?关键代码逻辑�?1. 日志配置项：日志级别选择开关、日志导出功能开关�?2. 导航入口：跳转独立主题调色板设置页面（每一类UI元素拥有独立调色板变量）�?3. OOBE向导相关代码：全部删除，不再保留�?
+## 7. app/src/main/java/com/luminaauth/LogBuffer.java
+文件类型：全局日志管理类（遗留 Java），日志系统核心
+作用：统一收集APP全部事件日志，持久化存储，对外提供日志导出能力�?关键代码逻辑�?1. 接收事件来源：自动认证流程事件、手动登录流程事件、服务状态变更事件、通知监听绑定事件、网络状态事件、接口请求响应数据�?2. 日志格式：输出纯英文，无面向用户的自然语言解释文本，精简结构，适合机器解析，去除中文提示�?3. 内存缓冲：环形缓冲区缓存日志，避免内存无限膨胀；同时写入本地文件持久化保存�?4. 导出函数：原复制到剪贴板逻辑修改，将日志输出为本地文件，实现日志导出功能�?5. 完整收录手动登录的HTTP请求报文、HTTP响应报文、错误信息，写入日志流�?
+## 8. app/src/main/java/com/luminaauth/AutoLoginService.java
+文件类型：Android前台Service，后台常驻核心服�?作用：APP后台业务核心，持续维护校园网认证状态，执行自动重连逻辑�?关键代码逻辑�?1. 状态机维护：状态枚�?NEED_AUTH / ONLINE / OFFLINE，定时持久化保存当前状态�?2. 自动重连策略：网络连接变更、捕获到下线通知时触发认证；内置请求冷却计时器，防止短时间高频重复请求�?3. 网络调用：调�?`NetworkUtils` 执行HTTP登录请求，解析服务端返回结果�?4. 通知监听绑定：调�?`requestBindListener` 绑定系统通知监听服务，捕获绑定失败异常并写入日志�?5. 日志上报：每一次认证发起、重连、超时、接口报错，都将事件推送至日志管理器记录�?
+## 9. app/src/main/java/com/luminaauth/NetworkUtils.java
+文件类型：网络接口封装类（遗�?Java），DrCOM ePortal 协议�?作用：封装DrCOM校园网页认证接口，构造登录表单、解析返回结果�?关键代码逻辑�?1. �?`HttpURLConnection` 发起GET/POST请求，构造登录表单参数，拼接ISP账号后缀，区分教职工/学生账号�?2. 解析HTTP返回报文，识别多种结果：登录成功、账号密码错误、账号不存在、连接超时、服务端拒绝�?3. 全部请求报文、返回响应报文对外输出，交给日志管理器写入日志�?
+## 10. app/src/main/java/com/luminaauth/theme/ThemeSettingsActivity.kt
+文件类型：独立主题调色板Compose页面
+作用：独立设置页面，所有UI元素颜色引用变量调色板，每一类元素单独调色，支持深色/浅色模式切换�?关键代码逻辑�?1. 颜色变量集中�?`app/src/main/java/com/luminaauth/theme/AppPalette.kt`，所有页面组件不写死硬编码色值�?2. 分元素调色：卡片背景、文字、边框、滑块、按钮、玻璃模糊层，各自独立颜色变量�?3. 浅色/深色两套调色板，跟随系统深色模式自动切换；配�?`ColorPickerDialog.kt` 取色�?
+## 11. app/src/main/java/com/luminaauth/LiquidSlider.kt
+文件类型：自定义Compose液态玻璃滑动条组件（AndroidLiquidGlass风格�?作用：HyperIsland风格自定义滑块UI，就是页面设置里的滑动条控件�?关键代码逻辑�?1. 布局控制：滑块容器底部增加margin，和下方相邻控件拉开垂直间距，消除紧贴问题�?2. 动画实现：滑动手势添加弹性插值器，实现q弹回弹动画效果（配合 `DampedDragAnimation.kt`）�?3. 手势监听：检测手指按下（onPointerDown）事件，触发逻辑，将滑块按钮长度重置为默认基准长度�?4. 样式：液态玻璃高斯模糊、圆角卡片，Miuix风格�?
+## 12. 其它模块（按目录�?- `app/src/main/java/com/luminaauth/LoginService.java`：登录业务执行层，页面与后台服务之间的桥梁，统一封装手动登录、状态查询调用，并把认证过程的全部请�?响应数据转发到日志管理器�?- `app/src/main/java/com/luminaauth/abouteffect/`：关于页背景特效（`BgEffectBackground.kt`、`BgEffectPainter.kt`、`BlurExt.kt`、`DeviceType.kt`、`WindowSize.kt` 等）�?- `app/src/main/java/com/luminaauth/about/` + `AboutActivity.kt`：关于页 Compose 实现�?UI 状态�?- 底层 UI 构件：`Lens.kt`、`Vibrancy.kt`、`CombinedBackdrop.kt`、`BottomBlurBar.kt`、`TopBlurBar.kt`、`FloatingBottomBar.kt`、`LiquidBottomTabs.kt`、`LiquidBottomTab.kt`、`LiquidToggle.kt`、`InteractiveHighlight.kt`、`InnerShadow.kt`、`DragGestureInspector.kt`�?- 工具类：`PrefUtils.java`（本地持久化）、`AppContext.java`、`ThemeUtils.kt`、`AuthState.kt`、`MainPagerState.kt`�?
+## 13. 遗留Java文件
+`LogBuffer.java`、`NetworkUtils.java`、`AutoLoginService.java`、`LoginService.java`、`AutoLoginReceiver.java`、`BootReceiver.java`、`PrefUtils.java`、`AppContext.java`、`RootUtils.java`、`ShizukuUtils.java`、`ShellUserService.java`。可按需逐步迁移至Kotlin；本次任务不强制全量转换，优先保证业务功能稳定�?
+## 硬性约束（给DeepSeek，不可忽略）
+1. 修改代码时，不要改动VersionCode自增逻辑，除非收到单独指令�?2. Root / Shizuku 代码是当前保留功能（增强模式），**不要擅自删除**；注释保持原始文本，不要新增多余注释�?3. 不要随意新增依赖库，尽量复用现有依赖�?4. 编译产物必须源码zip + Release APK一起输出�?5. 日志保持纯英文机器可读格式，禁止加中文提示文本�?

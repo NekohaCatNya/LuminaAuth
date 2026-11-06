@@ -1,0 +1,8 @@
+build/
+.gradle/
+.idea/
+.cxx/
+local.properties
+*.apk
+.kotlin/
+libs-maven/
