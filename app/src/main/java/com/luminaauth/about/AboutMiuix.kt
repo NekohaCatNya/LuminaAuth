@@ -219,8 +219,8 @@ fun AboutScreenMiuix(
         }
     }
 
-    // 更新对话框（直接在 Composable 里调用，和高级设置页一样）
-    if (showUpdateDialog && updateState is UpdateUi.Available) {
+    // 更新对话框（始终在组合里，用 show 控制显隐，和高级设置页一样）
+    if (updateState is UpdateUi.Available) {
         val rel = (updateState as UpdateUi.Available).rel
         LaunchedEffect(showUpdateDialog) {
             if (showUpdateDialog && dialogPhase == DialogPhase.Loading) {
