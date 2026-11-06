@@ -217,11 +217,9 @@ fun AboutScreenMiuix(
                 onDialogPhaseChange = { dialogPhase = it },
             )
         }
-    }
 
-    // 更新对话框（始终在组合里，用 show 控制显隐，和高级设置页一样）
-    if (updateState is UpdateUi.Available) {
-        val rel = (updateState as UpdateUi.Available).rel
+        // 更新对话框（必须在 Scaffold content lambda 内部，和高级设置页一样）
+        val rel = (updateState as? UpdateUi.Available)?.rel
         LaunchedEffect(showUpdateDialog) {
             if (showUpdateDialog && dialogPhase == DialogPhase.Loading) {
                 kotlinx.coroutines.delay(600)
@@ -229,7 +227,7 @@ fun AboutScreenMiuix(
             }
         }
         OverlayDialog(
-            show = showUpdateDialog,
+            show = showUpdateDialog && rel != null,
             title = "更新说明",
             summary = "",
             onDismissRequest = { showUpdateDialog = false },
@@ -253,7 +251,7 @@ fun AboutScreenMiuix(
                             )
                         }
                         DialogPhase.Notes -> Column {
-                            val notes = rel.body.ifBlank { "无更新说明" }
+                            val notes = rel?.body.orEmpty().ifBlank { "无更新说明" }
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -280,9 +278,10 @@ fun AboutScreenMiuix(
                                         dialogPhase = DialogPhase.Progress
                                         downloadDone = 0L
                                         downloadTotal = 0L
+                                        val r = rel ?: return@TextButton
                                         val dest = File(context.externalCacheDir, "update.apk")
                                         UpdateChecker.startDownload(
-                                            url = rel.apkUrl,
+                                            url = r.apkUrl,
                                             dest = dest,
                                             onProgress = { done, total ->
                                                 downloadDone = done
