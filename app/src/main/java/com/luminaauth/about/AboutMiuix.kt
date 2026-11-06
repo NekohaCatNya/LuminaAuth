@@ -199,7 +199,7 @@ fun AboutScreenMiuix(
                 )
             }
         },
-        popupHost = { },
+        popupHost = { top.yukonga.miuix.kmp.utils.MiuixPopupUtils.MiuixPopupHost() },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
         Box(modifier = if (barBlurBackdrop != null) Modifier.layerBackdrop(barBlurBackdrop) else Modifier) {
@@ -219,7 +219,7 @@ fun AboutScreenMiuix(
         }
     }
 
-    // 更新对话框
+    // 更新对话框（直接在 Composable 里调用，和高级设置页一样）
     if (showUpdateDialog && updateState is UpdateUi.Available) {
         val rel = (updateState as UpdateUi.Available).rel
         LaunchedEffect(showUpdateDialog) {
@@ -228,102 +228,93 @@ fun AboutScreenMiuix(
                 dialogPhase = DialogPhase.Notes
             }
         }
-        androidx.compose.ui.window.Dialog(
+        OverlayDialog(
+            show = showUpdateDialog,
+            title = "更新说明",
+            summary = "",
             onDismissRequest = { showUpdateDialog = false },
-            properties = androidx.compose.ui.window.DialogProperties(
-                dismissOnClickOutside = false,
-                usePlatformDefaultWidth = false
-            )
         ) {
-            androidx.compose.material3.Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = colorScheme.surface,
-                modifier = Modifier.padding(horizontal = 32.dp)
-            ) {
-                Column(modifier = Modifier.padding(24.dp)) {
-                    Text("更新说明", fontSize = 18.sp, fontWeight = FontWeight.Medium, color = colorScheme.onSurface)
-                    Spacer(Modifier.height(16.dp))
-                    Crossfade(
-                        targetState = dialogPhase,
-                        animationSpec = tween(durationMillis = 300),
-                        label = "dialogPhase"
-                    ) { phase ->
-                        when (phase) {
-                            DialogPhase.Loading -> Box(
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Crossfade(
+                    targetState = dialogPhase,
+                    animationSpec = tween(durationMillis = 300),
+                    label = "dialogPhase"
+                ) { phase ->
+                    when (phase) {
+                        DialogPhase.Loading -> Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            InfiniteProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                color = colorScheme.primary
+                            )
+                        }
+                        DialogPhase.Notes -> Column {
+                            val notes = rel.body.ifBlank { "无更新说明" }
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(120.dp),
-                                contentAlignment = Alignment.Center
+                                    .heightIn(max = 200.dp)
+                                    .verticalScroll(rememberScrollState())
                             ) {
-                                InfiniteProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    color = colorScheme.primary
-                                )
-                            }
-                            DialogPhase.Notes -> Column {
-                                val notes = rel.body.ifBlank { "无更新说明" }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
-                                        .verticalScroll(rememberScrollState())
-                                ) {
-                                    Text(
-                                        notes,
-                                        fontSize = 13.sp,
-                                        color = colorScheme.onSurfaceVariantSummary,
-                                        modifier = Modifier.padding(vertical = 4.dp)
-                                    )
-                                }
-                                Spacer(Modifier.height(16.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    TextButton(
-                                        text = "取消",
-                                        onClick = { showUpdateDialog = false },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    TextButton(
-                                        text = "确定",
-                                        onClick = {
-                                            dialogPhase = DialogPhase.Progress
-                                            downloadDone = 0L
-                                            downloadTotal = 0L
-                                            val dest = File(context.externalCacheDir, "update.apk")
-                                            UpdateChecker.startDownload(
-                                                url = rel.apkUrl,
-                                                dest = dest,
-                                                onProgress = { done, total ->
-                                                    downloadDone = done
-                                                    downloadTotal = total
-                                                },
-                                                onDone = { f ->
-                                                    UpdateChecker.install(context, f)
-                                                },
-                                                onError = {
-                                                    dialogPhase = DialogPhase.Notes
-                                                },
-                                            )
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            DialogPhase.Progress -> Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
-                                LinearProgressIndicator(
-                                    progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(Modifier.height(8.dp))
                                 Text(
-                                    "$pct%",
-                                    fontSize = 14.sp,
-                                    color = colorScheme.onSurfaceVariantSummary
+                                    notes,
+                                    fontSize = 13.sp,
+                                    color = colorScheme.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
+                            Spacer(Modifier.height(16.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                TextButton(
+                                    text = "取消",
+                                    onClick = { showUpdateDialog = false },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    text = "确定",
+                                    onClick = {
+                                        dialogPhase = DialogPhase.Progress
+                                        downloadDone = 0L
+                                        downloadTotal = 0L
+                                        val dest = File(context.externalCacheDir, "update.apk")
+                                        UpdateChecker.startDownload(
+                                            url = rel.apkUrl,
+                                            dest = dest,
+                                            onProgress = { done, total ->
+                                                downloadDone = done
+                                                downloadTotal = total
+                                            },
+                                            onDone = { f ->
+                                                UpdateChecker.install(context, f)
+                                            },
+                                            onError = {
+                                                dialogPhase = DialogPhase.Notes
+                                            },
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        DialogPhase.Progress -> Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
+                            LinearProgressIndicator(
+                                progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "$pct%",
+                                fontSize = 14.sp,
+                                color = colorScheme.onSurfaceVariantSummary
+                            )
                         }
                     }
                 }
