@@ -16,10 +16,10 @@ object UpdateChecker {
     const val REPO_URL = "https://github.com/$REPO"
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
 
-    data class Release(val version: String, val apkUrl: String, val size: Long)
+    data class Release(val version: String, val apkUrl: String, val size: Long, val vc: Long = 0, val body: String = "")
 
     /** 查最新 release；返回 null 表示已是最新或没找到可安装的 apk 资源 */
-    suspend fun checkLatest(currentVersion: String): Release? =
+    suspend fun checkLatest(currentVersion: String, currentVc: Long = 0): Release? =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var conn: HttpURLConnection? = null
             try {
@@ -34,8 +34,11 @@ object UpdateChecker {
                 if (conn.responseCode != 200) return@withContext null
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
-                val tag = json.optString("tag_name").removePrefix("v").substringBefore('-').trim()
-                if (!isNewer(tag, currentVersion)) return@withContext null
+                val rawTag = json.optString("tag_name").removePrefix("v").trim()
+                val tag = rawTag.substringBefore('-').trim()
+                val tagVc = Regex("vc(\\d+)").find(rawTag)?.groupValues?.get(1)?.toLongOrNull() ?: 0
+                if (!isNewer(tag, currentVersion, tagVc, currentVc)) return@withContext null
+                val releaseBody = json.optString("body").trim()
                 val assets = json.optJSONArray("assets") ?: return@withContext null
                 var apkUrl: String? = null
                 var size = 0L
@@ -48,7 +51,7 @@ object UpdateChecker {
                         break
                     }
                 }
-                if (apkUrl == null) null else Release(tag, apkUrl, size)
+                if (apkUrl == null) null else Release(tag, apkUrl, size, tagVc, releaseBody)
             } catch (_: Throwable) {
                 null
             } finally {
@@ -56,7 +59,7 @@ object UpdateChecker {
             }
         }
 
-    private fun isNewer(tag: String, current: String): Boolean {
+    private fun isNewer(tag: String, current: String, tagVc: Long, currentVc: Long): Boolean {
         val tp = tag.split(".").mapNotNull { it.toIntOrNull() }
         val cp = current.split(".").mapNotNull { it.toIntOrNull() }
         val n = maxOf(tp.size, cp.size)
@@ -66,6 +69,7 @@ object UpdateChecker {
             if (t > c) return true
             if (t < c) return false
         }
+        if (tagVc > 0 && currentVc > 0 && tagVc > currentVc) return true
         return false
     }
 

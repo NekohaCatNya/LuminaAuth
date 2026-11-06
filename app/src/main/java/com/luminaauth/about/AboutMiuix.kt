@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
@@ -36,6 +40,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -107,6 +112,8 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
@@ -537,11 +544,21 @@ private fun AboutContent(
                             context.packageManager.getPackageInfo(context.packageName, 0).versionName
                         }.getOrNull().orEmpty()
                     }
+                    val currentVc = remember {
+                        runCatching {
+                            context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
+                        }.getOrDefault(0L)
+                    }
                     var updateState by remember { mutableStateOf<UpdateUi>(UpdateUi.Checking) }
                     LaunchedEffect(Unit) {
-                        val rel = UpdateChecker.checkLatest(currentVersion)
+                        val rel = UpdateChecker.checkLatest(currentVersion, currentVc)
                         updateState = if (rel != null) UpdateUi.Available(rel) else UpdateUi.UpToDate
                     }
+                    // 更新对话框状态
+                    var showUpdateDialog by remember { mutableStateOf(false) }
+                    var dialogPhase by remember { mutableStateOf(DialogPhase.Loading) }
+                    var downloadDone by remember { mutableLongStateOf(0L) }
+                    var downloadTotal by remember { mutableLongStateOf(0L) }
                     Card(
                         modifier = Modifier
                             .padding(horizontal = 12.dp)
@@ -616,93 +633,152 @@ private fun AboutContent(
                             Color.Transparent,
                         ),
                     ) {
-                        Column(modifier = Modifier.animateContentSize()) {
-                            // 主行：固定 56dp 高，右侧控件位置完全固定
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("检查更新", fontSize = 15.sp, color = colorScheme.onSurface)
-                                Spacer(Modifier.weight(1f))
-                                // Crossfade 自带固定尺寸，内容全部居中，加载圈和按钮位置完全重合
-                                Crossfade(
-                                    targetState = updateState,
-                                    modifier = Modifier.size(width = 88.dp, height = 32.dp),
-                                    label = "updateState",
-                                    animationSpec = tween(durationMillis = 400)
-                                ) { st ->
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        when (st) {
-                                            is UpdateUi.Checking -> InfiniteProgressIndicator(
-                                                modifier = Modifier.size(20.dp),
-                                                color = colorScheme.primary
-                                            )
-                                            is UpdateUi.UpToDate -> UpdateActionButton(
-                                                text = "无更新",
-                                                accent = colorScheme.onSurfaceVariantSummary,
-                                                enabled = false,
-                                                onClick = {}
-                                            )
-                                            is UpdateUi.Available -> UpdateActionButton(
-                                                text = "更新",
-                                                accent = Color(0xFF4CAF50),
-                                                enabled = true,
-                                                onClick = {
-                                                    val rel = st.rel
-                                                    val dest = File(context.externalCacheDir, "update.apk")
-                                                    UpdateChecker.startDownload(
-                                                        url = rel.apkUrl,
-                                                        dest = dest,
-                                                        onProgress = { done, total ->
-                                                            updateState = UpdateUi.Downloading(rel, done, total)
-                                                        },
-                                                        onDone = { f ->
-                                                            updateState = UpdateUi.Installing
-                                                            UpdateChecker.install(context, f)
-                                                        },
-                                                        onError = { updateState = UpdateUi.Available(rel) },
-                                                    )
-                                                }
-                                            )
-                                            is UpdateUi.Downloading -> Unit
-                                            is UpdateUi.Installing -> Unit
-                                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .padding(horizontal = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("检查更新", fontSize = 15.sp, color = colorScheme.onSurface)
+                            Spacer(Modifier.weight(1f))
+                            Crossfade(
+                                targetState = updateState,
+                                modifier = Modifier.size(width = 88.dp, height = 32.dp),
+                                label = "updateState",
+                                animationSpec = tween(durationMillis = 400)
+                            ) { st ->
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    when (st) {
+                                        is UpdateUi.Checking -> InfiniteProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            color = colorScheme.primary
+                                        )
+                                        is UpdateUi.UpToDate -> UpdateActionButton(
+                                            text = "无更新",
+                                            accent = colorScheme.onSurfaceVariantSummary,
+                                            enabled = false,
+                                            onClick = {}
+                                        )
+                                        is UpdateUi.Available -> UpdateActionButton(
+                                            text = "更新",
+                                            accent = Color(0xFF4CAF50),
+                                            enabled = true,
+                                            onClick = {
+                                                dialogPhase = DialogPhase.Loading
+                                                showUpdateDialog = true
+                                            }
+                                        )
+                                        is UpdateUi.Downloading -> Unit
+                                        is UpdateUi.Installing -> Unit
                                     }
                                 }
                             }
-                            // 下载进度行：仅下载时向下展开，淡入
-                            AnimatedVisibility(visible = updateState is UpdateUi.Downloading || updateState is UpdateUi.Installing) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    when (val st = updateState) {
-                                        is UpdateUi.Downloading -> {
-                                            LinearProgressIndicator(
-                                                progress = if (st.total > 0) st.done.toFloat() / st.total else 0f,
-                                                modifier = Modifier.weight(1f)
+                        }
+                    }
+
+                    // 更新对话框
+                    if (showUpdateDialog && updateState is UpdateUi.Available) {
+                        val rel = (updateState as UpdateUi.Available).rel
+                        LaunchedEffect(showUpdateDialog) {
+                            if (showUpdateDialog && dialogPhase == DialogPhase.Loading) {
+                                kotlinx.coroutines.delay(600)
+                                dialogPhase = DialogPhase.Notes
+                            }
+                        }
+                        OverlayDialog(
+                            show = showUpdateDialog,
+                            title = "更新说明",
+                            summary = "",
+                            onDismissRequest = {
+                                showUpdateDialog = false
+                            },
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Crossfade(
+                                    targetState = dialogPhase,
+                                    animationSpec = tween(durationMillis = 300),
+                                    label = "dialogPhase"
+                                ) { phase ->
+                                    when (phase) {
+                                        DialogPhase.Loading -> Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(120.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            InfiniteProgressIndicator(
+                                                modifier = Modifier.size(28.dp),
+                                                color = colorScheme.primary
                                             )
-                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        DialogPhase.Notes -> Column {
+                                            val notes = rel.body.ifBlank { "无更新说明" }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(max = 200.dp)
+                                                    .verticalScroll(rememberScrollState())
+                                            ) {
+                                                Text(
+                                                    notes,
+                                                    fontSize = 13.sp,
+                                                    color = colorScheme.onSurfaceVariantSummary,
+                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                )
+                                            }
+                                            Spacer(Modifier.height(16.dp))
+                                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                TextButton(
+                                                    text = "取消",
+                                                    onClick = { showUpdateDialog = false },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                TextButton(
+                                                    text = "确定",
+                                                    onClick = {
+                                                        dialogPhase = DialogPhase.Progress
+                                                        downloadDone = 0L
+                                                        downloadTotal = 0L
+                                                        val dest = File(context.externalCacheDir, "update.apk")
+                                                        UpdateChecker.startDownload(
+                                                            url = rel.apkUrl,
+                                                            dest = dest,
+                                                            onProgress = { done, total ->
+                                                                downloadDone = done
+                                                                downloadTotal = total
+                                                            },
+                                                            onDone = { f ->
+                                                                UpdateChecker.install(context, f)
+                                                            },
+                                                            onError = {
+                                                                dialogPhase = DialogPhase.Notes
+                                                            },
+                                                        )
+                                                    },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                        DialogPhase.Progress -> Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
+                                            LinearProgressIndicator(
+                                                progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            Spacer(Modifier.height(8.dp))
                                             Text(
-                                                "${(if (st.total > 0) (st.done * 100 / st.total) else 0)}%",
-                                                fontSize = 12.sp,
+                                                "$pct%",
+                                                fontSize = 14.sp,
                                                 color = colorScheme.onSurfaceVariantSummary
                                             )
                                         }
-                                        is UpdateUi.Installing -> Text(
-                                            "安装中…",
-                                            fontSize = 12.sp,
-                                            color = colorScheme.onSurfaceVariantSummary
-                                        )
-                                        else -> {}
                                     }
                                 }
                             }
@@ -729,6 +805,8 @@ private sealed interface UpdateUi {
     data class Downloading(val rel: UpdateChecker.Release, val done: Long, val total: Long) : UpdateUi
     data object Installing : UpdateUi
 }
+
+private enum class DialogPhase { Loading, Notes, Progress }
 
 /** 与设置页「去开启 / 已开启」按钮一致：自动高、14/7dp 内边距、12dp 圆角、12% 同色底、13sp 中等字重 */
 @Composable

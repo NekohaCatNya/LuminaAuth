@@ -260,7 +260,9 @@ fun SchoolAutologinApp() {
 
     // 日志监听
     LaunchedEffect(logVersion) {
-        LogBuffer.setListener { logVersion++ }
+        LogBuffer.setListener(object : LogBuffer.LogListener {
+            override fun onLogUpdated() { logVersion++ }
+        })
     }
 
     Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
