@@ -1,6 +1,7 @@
 package com.luminaauth.about
 
 import android.os.Build
+import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
@@ -169,6 +170,9 @@ fun AboutScreenMiuix(
     var dialogPhase by remember { mutableStateOf(DialogPhase.Loading) }
     var downloadDone by remember { mutableLongStateOf(0L) }
     var downloadTotal by remember { mutableLongStateOf(0L) }
+    var downloadSpeed by remember { mutableLongStateOf(0L) }
+    var lastTickTime by remember { mutableLongStateOf(0L) }
+    var lastTickDone by remember { mutableLongStateOf(0L) }
 
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
@@ -228,7 +232,7 @@ fun AboutScreenMiuix(
         }
         OverlayDialog(
             show = showUpdateDialog && rel != null,
-            title = "更新说明",
+            title = if (dialogPhase == DialogPhase.Progress) "更新中…" else "更新说明",
             summary = "",
             onDismissRequest = { showUpdateDialog = false },
         ) {
@@ -278,12 +282,22 @@ fun AboutScreenMiuix(
                                         dialogPhase = DialogPhase.Progress
                                         downloadDone = 0L
                                         downloadTotal = 0L
+                                        downloadSpeed = 0L
+                                        lastTickTime = System.currentTimeMillis()
+                                        lastTickDone = 0L
                                         val r = rel ?: return@TextButton
                                         val dest = File(context.externalCacheDir, "update.apk")
                                         UpdateChecker.startDownload(
                                             url = r.apkUrl,
                                             dest = dest,
                                             onProgress = { done, total ->
+                                                val now = System.currentTimeMillis()
+                                                val dt = now - lastTickTime
+                                                if (dt >= 500) {
+                                                    downloadSpeed = (done - lastTickDone) * 1000L / dt
+                                                    lastTickTime = now
+                                                    lastTickDone = done
+                                                }
                                                 downloadDone = done
                                                 downloadTotal = total
                                             },
@@ -301,7 +315,7 @@ fun AboutScreenMiuix(
                         }
                         DialogPhase.Progress -> Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalAlignment = Alignment.Start
                         ) {
                             val pct = if (downloadTotal > 0) (downloadDone * 100 / downloadTotal).toInt() else 0
                             LinearProgressIndicator(
@@ -309,9 +323,16 @@ fun AboutScreenMiuix(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(Modifier.height(8.dp))
+                            val speedStr = if (downloadSpeed >= 1024 * 1024) {
+                                String.format(Locale.US, "%.1f MB/s", downloadSpeed / (1024.0 * 1024.0))
+                            } else if (downloadSpeed >= 1024) {
+                                String.format(Locale.US, "%.0f KB/s", downloadSpeed / 1024.0)
+                            } else {
+                                "$downloadSpeed B/s"
+                            }
                             Text(
-                                "$pct%",
-                                fontSize = 14.sp,
+                                "$speedStr · $pct%",
+                                fontSize = 13.sp,
                                 color = colorScheme.onSurfaceVariantSummary
                             )
                         }
