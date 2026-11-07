@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
         val netCh = PrefUtils.getNetChannel(this)
         val iface = NetworkChannel.requestChannel(netCh)
         NativeBridge.nativeSetBindIface(iface)
+        LogBuffer.add("NET", "CHANNEL: " + (if (netCh == 0) "WiFi" else "MobileData") + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
     }
 
     /**
@@ -627,11 +628,11 @@ private fun LogPage(logVersion: Int) {
             }
         }
         Spacer(Modifier.height(10.dp))
-        // 预览框：约 12 行
+        // 预览框：约 30 行
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(250.dp)
+                .height(540.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(boxBg)
                 .padding(12.dp)
@@ -1072,6 +1073,7 @@ private fun SettingsPage(
                     PrefUtils.setNetChannel(context, it)
                     val iface = NetworkChannel.requestChannel(it)
                     NativeBridge.nativeSetBindIface(iface)
+                    LogBuffer.add("NET", "CHANNEL: " + (if (it == 0) "WiFi" else "MobileData") + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
                 },
             )
         }
