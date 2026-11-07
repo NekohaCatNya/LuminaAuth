@@ -876,7 +876,7 @@ private fun SettingsPage(
                         modifier = Modifier.weight(1f)
                     )
                     Text(
-                        String.format(Locale.US, "%.0f 秒", waitSec),
+                        if (notifyDetect) "0 秒" else String.format(Locale.US, "%.0f 秒", waitSec),
                         fontSize = 14.sp,
                         color = secondary
                     )
