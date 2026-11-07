@@ -137,10 +137,16 @@ class MainActivity : ComponentActivity() {
         applyHighRefreshRate()
         // 初始化网络通道绑定
         NetworkChannel.init(this)
-        val netCh = PrefUtils.getNetChannel(this)
-        val iface = NetworkChannel.requestChannel(netCh)
-        NativeBridge.nativeSetBindIface(iface)
-        LogBuffer.add("NET", "CHANNEL: " + (if (netCh == 0) "WiFi" else "MobileData") + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+        val channels = NetworkChannel.scanAvailable()
+        LogBuffer.add("NET", "Channel scan: " + channels.joinToString { it.label + "(" + it.iface + ")" })
+        val savedIdx = PrefUtils.getNetChannel(this)
+        val idx = if (savedIdx < channels.size) savedIdx else 0
+        if (channels.isNotEmpty()) {
+            val ch = channels[idx]
+            val iface = NetworkChannel.requestTransport(ch.transport)
+            NativeBridge.nativeSetBindIface(iface)
+            LogBuffer.add("NET", "CHANNEL: " + ch.label + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+        }
     }
 
     /**
@@ -1060,22 +1066,23 @@ private fun SettingsPage(
                 )
             }
             PermDivider()
-            // —— 发送通道 ——
-            WindowSpinnerPreference(
-                title = "发送通道",
-                items = listOf(
-                    DropdownItem(text = "WiFi"),
-                    DropdownItem(text = "移动数据"),
-                ),
-                selectedIndex = netChannel,
-                onSelectedIndexChange = {
-                    netChannel = it
-                    PrefUtils.setNetChannel(context, it)
-                    val iface = NetworkChannel.requestChannel(it)
-                    NativeBridge.nativeSetBindIface(iface)
-                    LogBuffer.add("NET", "CHANNEL: " + (if (it == 0) "WiFi" else "MobileData") + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
-                },
-            )
+            // —— 发送通道（动态：只显示扫描成功的通道）——
+            val channels = NetworkChannel.availableChannels
+            if (channels.isNotEmpty()) {
+                WindowSpinnerPreference(
+                    title = "发送通道",
+                    items = channels.map { DropdownItem(text = it.label) },
+                    selectedIndex = netChannel,
+                    onSelectedIndexChange = {
+                        netChannel = it
+                        PrefUtils.setNetChannel(context, it)
+                        val ch = channels[it]
+                        val iface = NetworkChannel.requestTransport(ch.transport)
+                        NativeBridge.nativeSetBindIface(iface)
+                        LogBuffer.add("NET", "CHANNEL: " + ch.label + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+                    },
+                )
+            }
         }
         Spacer(Modifier.height(24.dp))
         // 主题与配色入口（独立页面：主题模式 + 每类元素的调色板）
