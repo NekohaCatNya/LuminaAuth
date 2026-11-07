@@ -17,26 +17,30 @@ object NetworkChannel {
     // 返回绑定的接口名（如 "wlan0" / "rmnet0"），传给 C++ 做 SO_BINDTODEVICE
     fun requestChannel(netChannel: Int): String {
         val cm = connectivityManager ?: return ""
-        val transport = if (netChannel == 0)
-            android.net.NetworkCapabilities.TRANSPORT_WIFI
-        else
-            android.net.NetworkCapabilities.TRANSPORT_CELLULAR
+        return try {
+            val transport = if (netChannel == 0)
+                android.net.NetworkCapabilities.TRANSPORT_WIFI
+            else
+                android.net.NetworkCapabilities.TRANSPORT_CELLULAR
 
-        val request = NetworkRequest.Builder()
-            .addTransportType(transport)
-            .build()
+            val request = NetworkRequest.Builder()
+                .addTransportType(transport)
+                .build()
 
-        var iface = ""
-        val latch = java.util.concurrent.CountDownLatch(1)
-        val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                val props = cm.getLinkProperties(network)
-                iface = props?.interfaceName ?: ""
-                latch.countDown()
+            var iface = ""
+            val latch = java.util.concurrent.CountDownLatch(1)
+            val callback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    val props = cm.getLinkProperties(network)
+                    iface = props?.interfaceName ?: ""
+                    latch.countDown()
+                }
             }
+            cm.requestNetwork(request, callback)
+            latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
+            iface
+        } catch (_: Exception) {
+            ""
         }
-        cm.requestNetwork(request, callback)
-        latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
-        return iface
     }
 }
