@@ -64,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -687,6 +688,7 @@ private fun SettingsPage(
     blurEnabled: Boolean,
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val accent = MiuixTheme.colorScheme.primary
     val onSurface = MiuixTheme.colorScheme.onSurface
     val secondary = MiuixTheme.colorScheme.onSurfaceContainerVariant
@@ -938,7 +940,10 @@ private fun SettingsPage(
                 )
                 LiquidToggle(
                     selected = { autoAuth },
-                    onSelect = onAutoAuthChange,
+                    onSelect = {
+                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                        onAutoAuthChange(it)
+                    },
                     backdrop = canvasBackdrop,
                     onDragStateChange = handleControlDrag,
                 )
@@ -969,6 +974,7 @@ private fun SettingsPage(
                     backdrop = canvasBackdrop,
                     onDragStateChange = handleControlDrag,
                     onSelect = { on ->
+                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                         if (on) {
                             if (notifyAccessGranted) {
                                 notifyDetect = true
@@ -1015,6 +1021,7 @@ private fun SettingsPage(
                     backdrop = canvasBackdrop,
                     onDragStateChange = handleControlDrag,
                     onSelect = { on ->
+                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                         if (on) {
                             enhancedMode = true
                             scope.launch(Dispatchers.IO) {
