@@ -4,6 +4,7 @@
 
 #include "log_ring_buffer.h"
 #include "fast_json.h"
+#include "native_http.h"
 
 #define TAG "LuminaNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -62,6 +63,13 @@ Java_com_luminaauth_NativeBridge_nativeParseDrcom(JNIEnv* env, jclass cls, jstri
     snprintf(buf, sizeof(buf), "{\"valid\":%d,\"result\":%d,\"msg\":\"%s\"}",
              res.valid ? 1 : 0, res.result, res.msg.c_str());
     return env->NewStringUTF(buf);
+}
+
+JNIEXPORT void JNICALL
+Java_com_luminaauth_NativeBridge_nativeSetBindIface(JNIEnv* env, jclass cls, jstring iface) {
+    const char* ciface = env->GetStringUTFChars(iface, nullptr);
+    lumina::setBindInterface(std::string(ciface));
+    env->ReleaseStringUTFChars(iface, ciface);
 }
 
 }

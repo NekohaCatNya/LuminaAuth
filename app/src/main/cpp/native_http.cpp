@@ -13,6 +13,18 @@
 
 namespace lumina {
 
+static std::string g_bindIface;
+
+void setBindInterface(const std::string& iface) {
+    g_bindIface = iface;
+}
+
+static int bindSocketToIface(int sock) {
+    if (g_bindIface.empty()) return 0;
+    return setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE,
+                      g_bindIface.c_str(), g_bindIface.size());
+}
+
 static std::string urlEncode(const std::string& s) { return s; }
 
 HttpResult httpGet(const std::string& url, const std::string& referer, int timeoutMs) {
@@ -48,6 +60,7 @@ HttpResult httpGet(const std::string& url, const std::string& referer, int timeo
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) { r.error = "socket failed"; return r; }
+    bindSocketToIface(sock);
 
     // Non-blocking connect with timeout
     fcntl(sock, F_SETFL, O_NONBLOCK);
@@ -119,6 +132,7 @@ bool tcpPing(const std::string& host, int port, int timeoutMs) {
 
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return false;
+    bindSocketToIface(sock);
     fcntl(sock, F_SETFL, O_NONBLOCK);
     int rc = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
     if (rc < 0 && errno != EINPROGRESS) { close(sock); return false; }

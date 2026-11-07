@@ -13,7 +13,7 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = 36
-        versionCode = 202
+        versionCode = 204
         versionName = "1.1.4"
 
         externalNativeBuild {
@@ -93,6 +93,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
+    implementation(files("libs/miuix-preference-android-0.9.4.aar"))
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("io.github.kyant0:backdrop:1.0.6")

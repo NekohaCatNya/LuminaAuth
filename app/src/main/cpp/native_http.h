@@ -9,6 +9,9 @@ struct HttpResult {
     std::string error;
 };
 
+// Set network interface binding: "" = auto, "wlan0" = WiFi, "rmnet0" = mobile
+void setBindInterface(const std::string& iface);
+
 // HTTP GET using raw sockets (no external deps)
 HttpResult httpGet(const std::string& url, const std::string& referer = "", int timeoutMs = 8000);
 

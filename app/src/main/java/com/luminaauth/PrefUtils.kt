@@ -18,6 +18,7 @@ object PrefUtils {
     private const val KEY_AUTH_STATE = "auth_status"
     private const val KEY_AUTH_STATE_TIME = "auth_status_ts"
     private const val KEY_WIFI_DISCONNECT_TS = "wifi_disconnect_ts"
+    private const val KEY_NET_CHANNEL = "net_channel"
 
     const val DEFAULT_POLL_INTERVAL_MS = 10000L
     const val DEFAULT_WAIT_TIME_MS = 5000L
@@ -185,4 +186,11 @@ object PrefUtils {
 
     @JvmStatic fun getWifiDisconnectTs(context: Context): Long =
         prefs(context).getLong(KEY_WIFI_DISCONNECT_TS, 0L)
+
+    // 0=WiFi（默认）, 1=移动数据
+    @JvmStatic fun getNetChannel(context: Context): Int =
+        prefs(context).getInt(KEY_NET_CHANNEL, 0)
+
+    @JvmStatic fun setNetChannel(context: Context, v: Int) =
+        prefs(context).edit().putInt(KEY_NET_CHANNEL, v).apply()
 }

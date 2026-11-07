@@ -24,4 +24,5 @@ object NativeBridge {
     @JvmStatic external fun nativeHttpGet(url: String, referer: String?): String
     @JvmStatic external fun nativeTcpPing(host: String, port: Int): Boolean
     @JvmStatic external fun nativeResolveHost(host: String): String
+    @JvmStatic external fun nativeSetBindIface(iface: String): Unit
 }

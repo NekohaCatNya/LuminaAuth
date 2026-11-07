@@ -85,9 +85,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -133,6 +135,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         applyHighRefreshRate()
+        // 初始化网络通道绑定
+        NetworkChannel.init(this)
+        val netCh = PrefUtils.getNetChannel(this)
+        val iface = NetworkChannel.requestChannel(netCh)
+        NativeBridge.nativeSetBindIface(iface)
     }
 
     /**
@@ -682,6 +689,7 @@ private fun SettingsPage(
     val canvasBackdrop = rememberCanvasBackdrop { drawRect(surfaceColor) }
     var enhancedMode by remember { mutableStateOf(PrefUtils.isEnhancedModeEnabled(context)) }
     var notifyDetect by remember { mutableStateOf(PrefUtils.isNotifyDetectEnabled(context)) }
+    var netChannel by remember { mutableStateOf(PrefUtils.getNetChannel(context)) }
     var waitSec by remember { mutableFloatStateOf(PrefUtils.getWaitTimeMs(context) / 1000f) }
     var hasRoot by remember { mutableStateOf(false) }
     var hasShizuku by remember { mutableStateOf(false) }
@@ -1050,6 +1058,22 @@ private fun SettingsPage(
                     }
                 )
             }
+            PermDivider()
+            // —— 发送通道 ——
+            WindowSpinnerPreference(
+                title = "发送通道",
+                items = listOf(
+                    DropdownItem(text = "WiFi"),
+                    DropdownItem(text = "移动数据"),
+                ),
+                selectedIndex = netChannel,
+                onSelectedIndexChange = {
+                    netChannel = it
+                    PrefUtils.setNetChannel(context, it)
+                    val iface = NetworkChannel.requestChannel(it)
+                    NativeBridge.nativeSetBindIface(iface)
+                },
+            )
         }
         Spacer(Modifier.height(24.dp))
         // 主题与配色入口（独立页面：主题模式 + 每类元素的调色板）

@@ -3,6 +3,7 @@ project(lumina-native)
 
 add_library(lumina-native SHARED
     native_bridge.cpp
+    native_http.cpp
     log_ring_buffer.cpp
     fast_json.cpp
 )
