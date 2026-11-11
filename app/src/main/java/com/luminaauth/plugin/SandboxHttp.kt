@@ -1,5 +1,6 @@
 package com.luminaauth.plugin
 
+import com.luminaauth.NetworkChannel
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStream
@@ -57,7 +58,12 @@ object SandboxHttp {
 
         var conn: HttpURLConnection? = null
         try {
-            conn = (uri.toURL().openConnection() as HttpURLConnection).apply {
+            val urlObj = uri.toURL()
+            // 选中通道对应 Network：未认证门户下系统默认路由可能仍落在移动数据上，
+            // 必须显式从该 Network 建连接，否则内网认证服务器会走蜂窝出口而超时不可达。
+            val net = NetworkChannel.boundNetwork
+            conn = ((net?.openConnection(urlObj) ?: urlObj.openConnection())
+                as HttpURLConnection).apply {
                 requestMethod = method
                 connectTimeout = connectTimeoutMs
                 readTimeout = readTimeoutMs

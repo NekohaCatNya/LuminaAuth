@@ -9,7 +9,13 @@ import android.net.NetworkRequest
 object NetworkChannel {
     private var connectivityManager: ConnectivityManager? = null
     private val callbacks = mutableMapOf<Int, ConnectivityManager.NetworkCallback>()
+    private val networks = mutableMapOf<Int, Network>()
     val availableChannels = mutableListOf<ChannelInfo>()
+
+    /** 选中通道对应的 Android [Network]，沙箱 HTTP 用它强制从该网卡出站。 */
+    @Volatile
+    var boundNetwork: Network? = null
+        private set
 
     data class ChannelInfo(
         val transport: Int,
@@ -26,6 +32,7 @@ object NetworkChannel {
         val cm = connectivityManager ?: return emptyList()
         callbacks.values.forEach { runCatching { cm.unregisterNetworkCallback(it) } }
         callbacks.clear()
+        networks.clear()
         availableChannels.clear()
 
         val allTransports = listOf(
@@ -46,6 +53,7 @@ object NetworkChannel {
                         val props = cm.getLinkProperties(network)
                         val iface = props?.interfaceName ?: ""
                         synchronized(availableChannels) {
+                            networks[transport] = network
                             availableChannels.add(ChannelInfo(transport, label, iface))
                         }
                         latch.countDown()
@@ -73,6 +81,7 @@ object NetworkChannel {
                 override fun onAvailable(network: Network) {
                     val props = cm.getLinkProperties(network)
                     iface = props?.interfaceName ?: ""
+                    boundNetwork = network
                     latch.countDown()
                 }
             }
