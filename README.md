@@ -172,8 +172,27 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**188**
+- versionCode：**210**
 - applicationId：`com.luminaauth`
+
+## 更新记录
+
+### v1.1.4-vc210
+
+- 修复未认证门户下沙箱 HTTP 误走移动数据导致探测超时：保留选中通道对应的 Android `Network`，沙箱请求优先从该 Network 出站，避免校园网内网认证服务器经蜂窝出口不可达。
+
+### v1.1.4-vc209
+
+- 修复后台服务冷启动（进程被回收后由广播 / 定时拉起、尚未打开界面）时未挂接 `AppContext`，认证线程调用 `AppContext.get()` 空指针导致整次认证在进入插件沙箱前失败的问题。
+- 认证异常捕获放宽到 `Throwable`，并将完整堆栈写入详情日志，便于后续定位具体行号。
+
+### v1.1.4-vc208
+
+- 液态玻璃开关（LiquidToggle）拨动增加震动反馈，对齐 MIUI-X 交互手感。
+
+### v1.1.4-vc207
+
+- 新增动态网络通道扫描（WiFi / 移动数据 / 以太网），可选发送通道；C++ 侧按选中网卡 `SO_BINDTODEVICE` 绑定 socket。
 
 ## 开源协议
 
