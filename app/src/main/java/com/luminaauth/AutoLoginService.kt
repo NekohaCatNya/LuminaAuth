@@ -342,6 +342,7 @@ class AutoLoginService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        AppContext.attach(this)
         bgThread = HandlerThread("autologin-poll").also { it.start() }
         handler = Handler(bgThread!!.looper)
         LogBuffer.add("SVC", "start")
@@ -625,10 +626,13 @@ class AutoLoginService : Service() {
                         } else {
                             message = "认证服务器暂不可达，等待重试"
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         message = "异常: ${e.message}"
                         LogBuffer.add("AUTH", "attempt=$attempt err=${e.message}")
                         LogBuffer.addDetail("AUTH", "attempt=$attempt ex=$e")
+                        android.util.Log.getStackTraceString(e).lines().forEach {
+                            LogBuffer.addDetail("AUTH", "  | $it")
+                        }
                     }
                 }
 
