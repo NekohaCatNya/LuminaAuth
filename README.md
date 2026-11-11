@@ -172,10 +172,14 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**210**
+- versionCode：**211**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.4-vc211
+
+- 修复「发送通道」下拉列表同一网络通道重复出现多条的问题：扫描回调按通道类型去重，每个通道只保留一项。
 
 ### v1.1.4-vc210
 

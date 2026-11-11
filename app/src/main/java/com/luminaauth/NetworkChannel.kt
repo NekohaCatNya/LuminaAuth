@@ -53,6 +53,7 @@ object NetworkChannel {
                         val props = cm.getLinkProperties(network)
                         val iface = props?.interfaceName ?: ""
                         synchronized(availableChannels) {
+                            availableChannels.removeAll { it.transport == transport }
                             networks[transport] = network
                             availableChannels.add(ChannelInfo(transport, label, iface))
                         }
