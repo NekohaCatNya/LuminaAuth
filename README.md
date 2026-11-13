@@ -171,11 +171,15 @@ export ANDROID_HOME=/path/to/android-sdk
 
 ## 版本
 
-- versionName：**1.1.4**
-- versionCode：**216**
+- versionName：**1.1.5**
+- versionCode：**217**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.5-vc217
+
+- 版本号升级到 1.1.5，随多架构分包一同发布。
 
 ### v1.1.4-vc216
 
