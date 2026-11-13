@@ -172,15 +172,14 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**215**
+- versionCode：**216**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
 
-### v1.1.4-vc215
+### v1.1.4-vc216
 
-- 关于页新增「架构」一项，按当前安装包自身包含的原生库显示：分架构包显示对应 ABI（如 `arm64-v8a`），整合包显示 `universal（arm64-v8a / armeabi-v7a / x86 / x86_64）`。
-- 顺带修正关于页「编译 SDK」为 Android 17 (API 37)。
+- 修复应用内自动更新选错安装包：多架构发行版下按当前安装包自身 ABI 挑选对应的分架构 APK（`*-arm64-v8a.apk` 等），整合包安装的用户优先拿 `*-universal.apk`，旧版无后缀的包作为兜底。
 
 ### v1.1.4-vc214
 

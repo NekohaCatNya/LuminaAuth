@@ -29,9 +29,8 @@ class AboutActivity : ComponentActivity() {
                         versionName = "v$realVersionName · VersionCode $realVersionCode",
                         infoItems = listOf(
                             InfoItem("版本", "v$realVersionName (vc$realVersionCode)"),
-                            InfoItem("架构", AppAbi.describe(this@AboutActivity)),
                             InfoItem("最低系统", "Android 10 (API 29)"),
-                            InfoItem("编译 SDK", "Android 17 (API 37)"),
+                            InfoItem("编译 SDK", "Android 16 (API 36)"),
                             InfoItem("技术栈", "Compose + Miuix"),
                             InfoItem("提权方式", "Root / Shizuku"),
                             InfoItem("开源协议", "GPL-3.0-or-later"),

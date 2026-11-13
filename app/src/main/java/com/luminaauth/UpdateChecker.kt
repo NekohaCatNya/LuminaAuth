@@ -19,7 +19,7 @@ object UpdateChecker {
     data class Release(val version: String, val apkUrl: String, val size: Long, val vc: Long = 0, val body: String = "")
 
     /** 查最新 release；返回 null 表示已是最新或没找到可安装的 apk 资源 */
-    suspend fun checkLatest(currentVersion: String, currentVc: Long = 0): Release? =
+    suspend fun checkLatest(context: Context, currentVersion: String, currentVc: Long = 0): Release? =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             var conn: HttpURLConnection? = null
             try {
@@ -40,24 +40,45 @@ object UpdateChecker {
                 if (!isNewer(tag, currentVersion, tagVc, currentVc)) return@withContext null
                 val releaseBody = json.optString("body").trim()
                 val assets = json.optJSONArray("assets") ?: return@withContext null
-                var apkUrl: String? = null
+                // 多架构发行版：必须挑与自身架构一致的包，否则装上去跑不起来
+                val ownAbi = AppAbi.ownAbi(context)
+                val urls = ArrayList<String>(assets.length())
+                for (i in 0 until assets.length()) {
+                    val u = assets.getJSONObject(i).optString("browser_download_url")
+                    if (u.endsWith(".apk", ignoreCase = true)) urls.add(u)
+                }
+                val apkUrl = pickApk(urls, ownAbi) ?: return@withContext null
                 var size = 0L
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
-                    val u = a.optString("browser_download_url")
-                    if (u.endsWith(".apk", ignoreCase = true)) {
-                        apkUrl = u
+                    if (a.optString("browser_download_url") == apkUrl) {
                         size = a.optLong("size")
                         break
                     }
                 }
-                if (apkUrl == null) null else Release(tag, apkUrl, size, tagVc, releaseBody)
+                LogBuffer.add("UPD", "asset abi=${ownAbi ?: "universal"} -> ${apkUrl.substringAfterLast('/')}")
+                Release(tag, apkUrl, size, tagVc, releaseBody)
             } catch (_: Throwable) {
                 null
             } finally {
                 conn?.disconnect()
             }
         }
+
+    /**
+     * 选包优先级：与自身 ABI 完全匹配的分架构包 → universal 整合包 → 旧版无后缀的单一 apk。
+     * ownAbi 为 null 表示自身就是整合包，直接优先 universal。
+     */
+    private fun pickApk(urls: List<String>, ownAbi: String?): String? {
+        if (urls.isEmpty()) return null
+        if (ownAbi != null) {
+            urls.firstOrNull { it.endsWith("-$ownAbi.apk", ignoreCase = true) }?.let { return it }
+        }
+        urls.firstOrNull { it.endsWith("-universal.apk", ignoreCase = true) }?.let { return it }
+        // 旧发行版只有一个不带架构后缀的 apk
+        urls.firstOrNull { it.endsWith("-release.apk", ignoreCase = true) }?.let { return it }
+        return urls.firstOrNull()
+    }
 
     private fun isNewer(tag: String, current: String, tagVc: Long, currentVc: Long): Boolean {
         val tp = tag.split(".").mapNotNull { it.toIntOrNull() }

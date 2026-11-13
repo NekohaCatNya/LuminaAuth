@@ -163,7 +163,7 @@ fun AboutScreenMiuix(
     }
     var updateState by remember { mutableStateOf<UpdateUi>(UpdateUi.Checking) }
     LaunchedEffect(Unit) {
-        val rel = UpdateChecker.checkLatest(currentVersion, currentVc)
+        val rel = UpdateChecker.checkLatest(context, currentVersion, currentVc)
         updateState = if (rel != null) UpdateUi.Available(rel) else UpdateUi.UpToDate
     }
     var showUpdateDialog by remember { mutableStateOf(false) }
