@@ -345,6 +345,18 @@ class AutoLoginService : Service() {
         AppContext.attach(this)
         bgThread = HandlerThread("autologin-poll").also { it.start() }
         handler = Handler(bgThread!!.looper)
+        // 后台冷启动也要按已保存通道绑定一次，否则不打开界面时不会生效（放后台线程，避免阻塞主线程）
+        handler?.post {
+            try {
+                NetworkChannel.init(this)
+                val ch = PrefUtils.getNetChannel(this).coerceIn(0, NetworkChannel.labels.lastIndex)
+                val iface = NetworkChannel.applyChannel(ch)
+                NativeBridge.nativeSetBindIface(iface)
+                LogBuffer.add("NET", "CHANNEL: " + NetworkChannel.labels.getOrElse(ch) { "na" }
+                        + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+            } catch (_: Throwable) {
+            }
+        }
         LogBuffer.add("SVC", "start")
         startForeground(NOTIFY_ID, buildNotification("校园网自动认证", "后台监听校园网 WiFi，自动完成登录"))
         registerNetworkReceiver()

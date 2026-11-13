@@ -187,7 +187,7 @@ object PrefUtils {
     @JvmStatic fun getWifiDisconnectTs(context: Context): Long =
         prefs(context).getLong(KEY_WIFI_DISCONNECT_TS, 0L)
 
-    // 0=WiFi（默认）, 1=移动数据
+    // 0=WiFi（默认）, 1=移动数据, 2=以太网
     @JvmStatic fun getNetChannel(context: Context): Int =
         prefs(context).getInt(KEY_NET_CHANNEL, 0)
 

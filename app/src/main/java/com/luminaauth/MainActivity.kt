@@ -136,18 +136,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         applyHighRefreshRate()
-        // 初始化网络通道绑定
+        // 初始化网络通道绑定（固定三项，不扫描）
         NetworkChannel.init(this)
-        val channels = NetworkChannel.scanAvailable()
-        LogBuffer.add("NET", "Channel scan: " + channels.joinToString { it.label + "(" + it.iface + ")" })
-        val savedIdx = PrefUtils.getNetChannel(this)
-        val idx = if (savedIdx < channels.size) savedIdx else 0
-        if (channels.isNotEmpty()) {
-            val ch = channels[idx]
-            val iface = NetworkChannel.requestTransport(ch.transport)
-            NativeBridge.nativeSetBindIface(iface)
-            LogBuffer.add("NET", "CHANNEL: " + ch.label + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
-        }
+        val ch = PrefUtils.getNetChannel(this)
+        val iface = NetworkChannel.applyChannel(ch)
+        NativeBridge.nativeSetBindIface(iface)
+        LogBuffer.add("NET", "CHANNEL: " + NetworkChannel.labels.getOrElse(ch) { "na" }
+                + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
     }
 
     /**
@@ -698,7 +693,10 @@ private fun SettingsPage(
     val canvasBackdrop = rememberCanvasBackdrop { drawRect(surfaceColor) }
     var enhancedMode by remember { mutableStateOf(PrefUtils.isEnhancedModeEnabled(context)) }
     var notifyDetect by remember { mutableStateOf(PrefUtils.isNotifyDetectEnabled(context)) }
-    var netChannel by remember { mutableStateOf(PrefUtils.getNetChannel(context)) }
+    // 通道固定三项，历史保存值可能越界，读取时夹到合法范围
+    var netChannel by remember {
+        mutableStateOf(PrefUtils.getNetChannel(context).coerceIn(0, NetworkChannel.labels.lastIndex))
+    }
     var waitSec by remember { mutableFloatStateOf(PrefUtils.getWaitTimeMs(context) / 1000f) }
     var hasRoot by remember { mutableStateOf(false) }
     var hasShizuku by remember { mutableStateOf(false) }
@@ -1073,23 +1071,20 @@ private fun SettingsPage(
                 )
             }
             PermDivider()
-            // —— 发送通道（动态：只显示扫描成功的通道）——
-            val channels = NetworkChannel.availableChannels
-            if (channels.isNotEmpty()) {
-                WindowSpinnerPreference(
-                    title = "发送通道",
-                    items = channels.map { DropdownItem(text = it.label) },
-                    selectedIndex = netChannel,
-                    onSelectedIndexChange = {
-                        netChannel = it
-                        PrefUtils.setNetChannel(context, it)
-                        val ch = channels[it]
-                        val iface = NetworkChannel.requestTransport(ch.transport)
-                        NativeBridge.nativeSetBindIface(iface)
-                        LogBuffer.add("NET", "CHANNEL: " + ch.label + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
-                    },
-                )
-            }
+            // —— 发送通道（固定三项）——
+            WindowSpinnerPreference(
+                title = "发送通道",
+                items = NetworkChannel.labels.map { DropdownItem(text = it) },
+                selectedIndex = netChannel,
+                onSelectedIndexChange = {
+                    netChannel = it
+                    PrefUtils.setNetChannel(context, it)
+                    val iface = NetworkChannel.applyChannel(it)
+                    NativeBridge.nativeSetBindIface(iface)
+                    LogBuffer.add("NET", "CHANNEL: " + NetworkChannel.labels.getOrElse(it) { "na" }
+                            + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+                },
+            )
         }
         Spacer(Modifier.height(24.dp))
         // 主题与配色入口（独立页面：主题模式 + 每类元素的调色板）

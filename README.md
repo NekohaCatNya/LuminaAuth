@@ -172,10 +172,15 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**211**
+- versionCode：**212**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.4-vc212
+
+- 「发送通道」改回固定三项（WiFi / 移动数据 / 以太网），取消运行时扫描与动态列表，避免下拉重复项。
+- 后台服务冷启动时也会按已保存通道绑定一次，未打开界面同样生效。
 
 ### v1.1.4-vc211
 

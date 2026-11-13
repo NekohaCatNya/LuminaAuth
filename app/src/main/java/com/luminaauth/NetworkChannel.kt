@@ -6,90 +6,67 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 
+/**
+ * 发送通道：固定三项，不做运行时扫描。
+ *
+ * 0 = WiFi
+ * 1 = 移动数据
+ * 2 = 以太网
+ */
 object NetworkChannel {
+    const val WIFI = 0
+    const val CELLULAR = 1
+    const val ETHERNET = 2
+
+    val labels = listOf("WiFi", "移动数据", "以太网")
+
     private var connectivityManager: ConnectivityManager? = null
-    private val callbacks = mutableMapOf<Int, ConnectivityManager.NetworkCallback>()
-    private val networks = mutableMapOf<Int, Network>()
-    val availableChannels = mutableListOf<ChannelInfo>()
 
     /** 选中通道对应的 Android [Network]，沙箱 HTTP 用它强制从该网卡出站。 */
     @Volatile
     var boundNetwork: Network? = null
         private set
 
-    data class ChannelInfo(
-        val transport: Int,
-        val label: String,
-        val iface: String,
-    )
-
     fun init(context: Context) {
         connectivityManager =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
 
-    fun scanAvailable(): List<ChannelInfo> {
-        val cm = connectivityManager ?: return emptyList()
-        callbacks.values.forEach { runCatching { cm.unregisterNetworkCallback(it) } }
-        callbacks.clear()
-        networks.clear()
-        availableChannels.clear()
-
-        val allTransports = listOf(
-            NetworkCapabilities.TRANSPORT_WIFI to "WiFi",
-            NetworkCapabilities.TRANSPORT_CELLULAR to "移动数据",
-            NetworkCapabilities.TRANSPORT_ETHERNET to "以太网",
-        )
-
-        val latch = java.util.concurrent.CountDownLatch(allTransports.size)
-
-        for ((transport, label) in allTransports) {
-            try {
-                val request = NetworkRequest.Builder()
-                    .addTransportType(transport)
-                    .build()
-                val callback = object : ConnectivityManager.NetworkCallback() {
-                    override fun onAvailable(network: Network) {
-                        val props = cm.getLinkProperties(network)
-                        val iface = props?.interfaceName ?: ""
-                        synchronized(availableChannels) {
-                            availableChannels.removeAll { it.transport == transport }
-                            networks[transport] = network
-                            availableChannels.add(ChannelInfo(transport, label, iface))
-                        }
-                        latch.countDown()
-                    }
-                }
-                cm.registerNetworkCallback(request, callback)
-                callbacks[transport] = callback
-            } catch (_: Exception) {
-                latch.countDown()
-            }
-        }
-        latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
-        return availableChannels.toList()
+    private fun transportOf(channel: Int): Int = when (channel) {
+        CELLULAR -> NetworkCapabilities.TRANSPORT_CELLULAR
+        ETHERNET -> NetworkCapabilities.TRANSPORT_ETHERNET
+        else -> NetworkCapabilities.TRANSPORT_WIFI
     }
 
-    fun requestTransport(transport: Int): String {
-        val cm = connectivityManager ?: return ""
+    /**
+     * 应用选中通道：解析出网卡名并缓存对应 [Network]。
+     * 返回网卡名（如 "wlan0"），供 C++ `SO_BINDTODEVICE` 使用；失败返回空串表示不绑定。
+     */
+    fun applyChannel(channel: Int): String {
+        val cm = connectivityManager ?: run {
+            boundNetwork = null
+            return ""
+        }
         return try {
             val request = NetworkRequest.Builder()
-                .addTransportType(transport)
+                .addTransportType(transportOf(channel))
                 .build()
             var iface = ""
+            var network: Network? = null
             val latch = java.util.concurrent.CountDownLatch(1)
             val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    val props = cm.getLinkProperties(network)
-                    iface = props?.interfaceName ?: ""
-                    boundNetwork = network
+                override fun onAvailable(n: Network) {
+                    iface = cm.getLinkProperties(n)?.interfaceName ?: ""
+                    network = n
                     latch.countDown()
                 }
             }
             cm.requestNetwork(request, callback)
             latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
+            boundNetwork = network
             iface
         } catch (_: Exception) {
+            boundNetwork = null
             ""
         }
     }
