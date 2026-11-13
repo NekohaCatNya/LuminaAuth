@@ -172,10 +172,16 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.5**
-- versionCode：**217**
+- versionCode：**218**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.5-vc218
+
+- 修复「发送通道」绑定失败：冷启动时 `requestNetwork` 回调常常等不到，导致 Java HTTP 仍走蜂窝默认路由（源地址 10.39.x.x），内网认证服务器 `218.6.130.195:1333` 8 秒超时。
+  改为先同步枚举现有网络（`ConnectivityManager.allNetworks` + 传输类型匹配）直接拿到 `Network` 与网卡名，并注册常驻监听，WiFi 晚到也能自动补绑。
+- 每次认证尝试前重新刷新一次通道绑定，并在日志里记录 `attempt=N ch=WiFi iface=wlan0`，绑定失败一眼可见。
 
 ### v1.1.5-vc217
 

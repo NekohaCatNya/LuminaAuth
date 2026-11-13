@@ -614,6 +614,16 @@ class AutoLoginService : Service() {
                     }
                     updateStatus(this, "校园网自动认证", "正在认证（第 $attempt/$MAX_ATTEMPTS 次）...")
 
+                    // 每次尝试前刷新一次通道绑定：冷启动时 WiFi 可能还没就绪，第一次绑不上
+                    try {
+                        val ch = PrefUtils.getNetChannel(this@AutoLoginService)
+                            .coerceIn(0, NetworkChannel.labels.lastIndex)
+                        val ifaceNow = NetworkChannel.applyChannel(ch)
+                        LogBuffer.addDetail("AUTH", "attempt=$attempt ch=${NetworkChannel.labels[ch]}"
+                                + " iface=${ifaceNow.ifEmpty { "na" }}")
+                    } catch (_: Throwable) {
+                    }
+
                     val ip = waitForValidIp(NETWORK_READY_TIMEOUT_MS.toLong())
                     if (ip == null) {
                         message = "IP 未分配，等待重试"

@@ -12,6 +12,9 @@ import android.net.NetworkRequest
  * 0 = WiFi
  * 1 = 移动数据
  * 2 = 以太网
+ *
+ * 认证门户场景下当前 WiFi 没有默认路由（默认网络可能仍落在蜂窝上），
+ * 所以必须显式拿到该通道对应的 [Network] 再发 HTTP 请求。
  */
 object NetworkChannel {
     const val WIFI = 0
@@ -27,6 +30,12 @@ object NetworkChannel {
     var boundNetwork: Network? = null
         private set
 
+    @Volatile
+    private var currentChannel: Int = -1
+
+    /** 常驻监听：网络晚于进程出现（冷启动时 WiFi 还没连上）时自动补绑。 */
+    private val watchers = HashMap<Int, ConnectivityManager.NetworkCallback>()
+
     fun init(context: Context) {
         connectivityManager =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -39,35 +48,73 @@ object NetworkChannel {
     }
 
     /**
-     * 应用选中通道：解析出网卡名并缓存对应 [Network]。
-     * 返回网卡名（如 "wlan0"），供 C++ `SO_BINDTODEVICE` 使用；失败返回空串表示不绑定。
+     * 应用选中通道：优先同步枚举已有网络并缓存对应 [Network]。
+     * 返回网卡名（如 "wlan0"），供 C++ `SO_BINDTODEVICE` 使用；失败返回空串表示暂未绑定。
      */
+    @Synchronized
     fun applyChannel(channel: Int): String {
-        val cm = connectivityManager ?: run {
+        val cm = connectivityManager
+        if (cm == null) {
             boundNetwork = null
             return ""
         }
-        return try {
-            val request = NetworkRequest.Builder()
-                .addTransportType(transportOf(channel))
-                .build()
-            var iface = ""
-            var network: Network? = null
-            val latch = java.util.concurrent.CountDownLatch(1)
-            val callback = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(n: Network) {
-                    iface = cm.getLinkProperties(n)?.interfaceName ?: ""
-                    network = n
-                    latch.countDown()
-                }
+        currentChannel = channel
+        val transport = transportOf(channel)
+        watch(channel, transport)
+        val network = pick(cm, transport) ?: boundNetwork?.takeIf { cm.getNetworkCapabilities(it)?.hasTransport(transport) == true }
+        boundNetwork = network
+        return network?.let { n ->
+            try {
+                cm.getLinkProperties(n)?.interfaceName.orEmpty()
+            } catch (_: Throwable) {
+                ""
             }
-            cm.requestNetwork(request, callback)
-            latch.await(3, java.util.concurrent.TimeUnit.SECONDS)
-            boundNetwork = network
-            iface
-        } catch (_: Exception) {
-            boundNetwork = null
-            ""
+        }.orEmpty()
+    }
+
+    /** 同步挑一个该传输类型的网络；跳过 VPN 虚拟网卡和没有网卡名的网络。 */
+    private fun pick(cm: ConnectivityManager, transport: Int): Network? {
+        val all = try {
+            cm.allNetworks
+        } catch (_: Throwable) {
+            return null
+        }
+        for (n in all) {
+            val caps = try { cm.getNetworkCapabilities(n) } catch (_: Throwable) { null } ?: continue
+            if (!caps.hasTransport(transport)) continue
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
+            val iface = try { cm.getLinkProperties(n)?.interfaceName } catch (_: Throwable) { null }
+            if (iface.isNullOrEmpty()) continue
+            return n
+        }
+        return null
+    }
+
+    private fun watch(channel: Int, transport: Int) {
+        val cm = connectivityManager ?: return
+        if (watchers.containsKey(transport)) return
+        val request = NetworkRequest.Builder()
+            .addTransportType(transport)
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(n: Network) {
+                if (currentChannel != channel) return
+                boundNetwork = n
+                val iface = try { cm.getLinkProperties(n)?.interfaceName } catch (_: Throwable) { null }
+                LogBuffer.add("NET", "watch avail ch=${labels.getOrElse(channel) { "na" }} iface=${iface ?: "na"}")
+            }
+
+            override fun onLost(n: Network) {
+                if (boundNetwork != n) return
+                boundNetwork = pick(cm, transport)
+                LogBuffer.add("NET", "watch lost ch=${labels.getOrElse(channel) { "na" }}"
+                        + " rebind=" + (boundNetwork != null))
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, callback)
+            watchers[transport] = callback
+        } catch (_: Throwable) {
         }
     }
 
