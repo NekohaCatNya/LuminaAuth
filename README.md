@@ -172,10 +172,17 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.5**
-- versionCode：**218**
+- versionCode：**219**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.5-vc219
+
+- 认证 HTTP 真正落到 C++：`native_http.cpp` 重写为完整的 `httpRequest()`（GET/POST、`Content-Length`、`Transfer-Encoding: chunked` 解码、非阻塞 connect + 读写超时、512KB 响应上限），并新增 JNI 导出 `nativeHttpRequest`（之前 Kotlin 里声明了 `nativeHttpGet` 但 C++ 侧根本没实现，属于死代码）。
+- `SandboxHttp` 在 scheme 为 http 且已绑定网卡时走原生 socket，靠 `SO_BINDTODEVICE` 直接锁 wlan0 出站，绕开系统默认路由；原生失败自动回退 Java 并记 `native_http fallback` 详细日志。https 仍由 Java 层负责（原生裸 socket 不做 TLS）。
+- 安全边界不变：scheme 校验与 host 白名单仍在 Kotlin 侧，原生只负责传输。
+- `NetworkChannel` 增加 `boundIface`，绑定变化时同步更新，原生层可直接取网卡名。
 
 ### v1.1.5-vc218
 

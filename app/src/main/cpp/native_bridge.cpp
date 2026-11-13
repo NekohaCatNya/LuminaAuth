@@ -72,4 +72,56 @@ Java_com_luminaauth_NativeBridge_nativeSetBindIface(JNIEnv* env, jclass cls, jst
     env->ReleaseStringUTFChars(iface, ciface);
 }
 
+// 把响应体转义成 JSON 字符串字面量（引号、反斜杠、换行、控制字符）
+static std::string jsonEscape(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 16);
+    for (size_t i = 0; i < in.size(); ++i) {
+        unsigned char c = (unsigned char)in[i];
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += (char)c;
+                }
+        }
+    }
+    return out;
+}
+
+// 认证等 HTTP 请求：走原生 socket，按 SO_BINDTODEVICE 绑定的网卡出站。
+// 返回 {"code":200,"body":"...","error":""}；error 非空表示传输层失败。
+JNIEXPORT jstring JNICALL
+Java_com_luminaauth_NativeBridge_nativeHttpRequest(JNIEnv* env, jclass cls,
+                                                  jstring method, jstring url,
+                                                  jstring body, jstring referer,
+                                                  jint timeoutMs) {
+    const char* cm = env->GetStringUTFChars(method, nullptr);
+    const char* cu = env->GetStringUTFChars(url, nullptr);
+    const char* cb = (body != nullptr) ? env->GetStringUTFChars(body, nullptr) : "";
+    const char* cr = (referer != nullptr) ? env->GetStringUTFChars(referer, nullptr) : "";
+
+    lumina::HttpResult res = lumina::httpRequest(std::string(cm), std::string(cu),
+                                                 std::string(cb), std::string(cr),
+                                                 (int)timeoutMs);
+
+    env->ReleaseStringUTFChars(method, cm);
+    env->ReleaseStringUTFChars(url, cu);
+    if (body != nullptr) env->ReleaseStringUTFChars(body, cb);
+    if (referer != nullptr) env->ReleaseStringUTFChars(referer, cr);
+
+    std::string json = "{\"code\":" + std::to_string(res.code)
+                     + ",\"error\":\"" + jsonEscape(res.error) + "\""
+                     + ",\"body\":\"" + jsonEscape(res.body) + "\"}";
+    return env->NewStringUTF(json.c_str());
+}
+
 }

@@ -30,6 +30,11 @@ object NetworkChannel {
     var boundNetwork: Network? = null
         private set
 
+    /** 选中通道的网卡名（"wlan0" / "rmnet0" / "eth0"），给原生 socket 的 SO_BINDTODEVICE 用。 */
+    @Volatile
+    var boundIface: String = ""
+        private set
+
     @Volatile
     private var currentChannel: Int = -1
 
@@ -63,13 +68,18 @@ object NetworkChannel {
         watch(channel, transport)
         val network = pick(cm, transport) ?: boundNetwork?.takeIf { cm.getNetworkCapabilities(it)?.hasTransport(transport) == true }
         boundNetwork = network
-        return network?.let { n ->
-            try {
-                cm.getLinkProperties(n)?.interfaceName.orEmpty()
-            } catch (_: Throwable) {
-                ""
-            }
-        }.orEmpty()
+        val iface = ifaceOf(cm, network)
+        boundIface = iface
+        return iface
+    }
+
+    private fun ifaceOf(cm: ConnectivityManager, network: Network?): String {
+        if (network == null) return ""
+        return try {
+            cm.getLinkProperties(network)?.interfaceName.orEmpty()
+        } catch (_: Throwable) {
+            ""
+        }
     }
 
     /** 同步挑一个该传输类型的网络；跳过 VPN 虚拟网卡和没有网卡名的网络。 */
@@ -100,13 +110,15 @@ object NetworkChannel {
             override fun onAvailable(n: Network) {
                 if (currentChannel != channel) return
                 boundNetwork = n
-                val iface = try { cm.getLinkProperties(n)?.interfaceName } catch (_: Throwable) { null }
-                LogBuffer.add("NET", "watch avail ch=${labels.getOrElse(channel) { "na" }} iface=${iface ?: "na"}")
+                val iface = ifaceOf(cm, n)
+                boundIface = iface
+                LogBuffer.add("NET", "watch avail ch=${labels.getOrElse(channel) { "na" }} iface=${iface.ifEmpty { "na" }}")
             }
 
             override fun onLost(n: Network) {
                 if (boundNetwork != n) return
                 boundNetwork = pick(cm, transport)
+                boundIface = ifaceOf(cm, boundNetwork)
                 LogBuffer.add("NET", "watch lost ch=${labels.getOrElse(channel) { "na" }}"
                         + " rebind=" + (boundNetwork != null))
             }

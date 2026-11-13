@@ -1,5 +1,7 @@
 package com.luminaauth.plugin
 
+import com.luminaauth.LogBuffer
+import com.luminaauth.NativeBridge
 import com.luminaauth.NetworkChannel
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -56,6 +58,18 @@ object SandboxHttp {
             return Response(-1, "", "host_denied: $host:$port")
         }
 
+        val iface = NetworkChannel.boundIface
+        // http 请求优先走原生 socket：SO_BINDTODEVICE 直接锁网卡出站，
+        // 不受系统默认路由（未认证 WiFi 常常没有默认路由）影响。
+        if (scheme == "http" && iface.isNotEmpty()) {
+            val native = executeNative(method, urlString, body, maxOf(connectTimeoutMs, readTimeoutMs))
+            if (native != null && native.ok) return native
+            LogBuffer.addDetail(
+                "PLUGIN",
+                "native_http fallback iface=$iface err=${native?.transportError ?: "na"}"
+            )
+        }
+
         var conn: HttpURLConnection? = null
         try {
             val urlObj = uri.toURL()
@@ -103,6 +117,34 @@ object SandboxHttp {
 
     /** 单次响应最多读取的字符数，防止异常巨大的页面耗尽内存。 */
     private const val MAX_BODY_CHARS = 262_144
+
+    /**
+     * 原生 socket 传输（C++ `native_http.cpp`），返回 null 表示原生不可用。
+     * 只做传输，安全策略（scheme / host 白名单）已在上层校验完毕。
+     */
+    private fun executeNative(
+        method: String,
+        url: String,
+        body: String?,
+        timeoutMs: Int,
+    ): Response? {
+        if (!NativeBridge.isNativeAvailable()) return null
+        return try {
+            val json = NativeBridge.nativeHttpRequest(method, url, body, null, timeoutMs)
+            if (json.isEmpty()) return null
+            val obj = org.json.JSONObject(json)
+            val err = obj.optString("error")
+            if (err.isNotEmpty()) {
+                Response(-1, "", "native: $err")
+            } else {
+                val code = obj.optInt("code", -1)
+                val text = obj.optString("body")
+                if (code <= 0) Response(-1, "", "native: bad_response") else Response(code, text, null)
+            }
+        } catch (e: Throwable) {
+            Response(-1, "", "native: ${e.javaClass.simpleName}")
+        }
+    }
 
     private fun isHostAllowed(plugin: Plugin, host: String, declaredPort: Int): Boolean {
         val effectivePort = if (declaredPort >= 0) declaredPort else null

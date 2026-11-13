@@ -16,7 +16,7 @@ object NetworkUtils {
     @Throws(Exception::class)
     fun get(urlString: String, referer: String?): String {
         if (NativeBridge.isNativeAvailable()) {
-            val json = NativeBridge.nativeHttpGet(urlString, referer)
+            val json = NativeBridge.nativeHttpRequest("GET", urlString, null, referer, 8000)
             val o = JSONObject(json)
             val code = o.optInt("code", 0)
             val err = o.optString("error", "")
