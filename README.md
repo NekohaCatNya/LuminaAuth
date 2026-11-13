@@ -172,10 +172,14 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**212**
+- versionCode：**213**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.4-vc213
+
+- 新增：增强模式（root）下认证成功后自动催促系统重新评估网络，让默认网络尽快切到所选发送通道，随后重新绑定一次；本就是「已在线」时不触发，避免打断现有连接。
 
 ### v1.1.4-vc212
 

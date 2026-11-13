@@ -652,6 +652,8 @@ class AutoLoginService : Service() {
                 LogBuffer.addDetail("STATE", "auth_done ok=${if (success) 1 else 0} ->${AuthGlobalState.currentStatus}")
                 if (success || "已在线，无需操作" == message) clearCampusNotifications()
                 if (success) {
+                    // 本来就是已在线时不重连，避免把现有连接打断
+                    if ("已在线，无需操作" != message) promoteSelectedChannel()
                     handler?.postDelayed({
                         try { updateStatus(this, "校园网自动认证", "后台监听校园网 WiFi，自动完成登录") } catch (_: Throwable) {}
                     }, 2000)
@@ -665,6 +667,35 @@ class AutoLoginService : Service() {
                 synchronized(LOGIN_LOCK) { loginInProgress = false }
             }
         }.start()
+    }
+
+    /**
+     * 增强模式 + root：认证成功后催促系统重新评估网络，让默认网络尽快切到所选通道，
+     * 随后重新绑定一次（重连后 Network 对象会变）。
+     */
+    private fun promoteSelectedChannel() {
+        try {
+            if (!PrefUtils.isEnhancedModeEnabled(this)) return
+            if (!RootUtils.isRootAvailable()) return
+            val ch = PrefUtils.getNetChannel(this).coerceIn(0, NetworkChannel.labels.lastIndex)
+            val label = NetworkChannel.labels.getOrElse(ch) { "na" }
+            val r = NetworkChannel.nudgeDefaultNetwork(ch)
+            if (r == null) {
+                LogBuffer.add("NET", "promote skip ch=$label")
+                return
+            }
+            LogBuffer.add("NET", "promote ch=$label cmd=$r")
+            handler?.postDelayed({
+                try {
+                    val iface = NetworkChannel.applyChannel(ch)
+                    NativeBridge.nativeSetBindIface(iface)
+                    LogBuffer.add("NET", "CHANNEL rebind: $label"
+                            + (if (iface.isEmpty()) " (failed)" else " iface=$iface"))
+                } catch (_: Throwable) {
+                }
+            }, 3000)
+        } catch (_: Throwable) {
+        }
     }
 
     private fun clearCampusNotifications() {

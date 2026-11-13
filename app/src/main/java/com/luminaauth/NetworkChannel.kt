@@ -70,4 +70,19 @@ object NetworkChannel {
             ""
         }
     }
+
+    /**
+     * 增强模式专用：认证成功后催促系统重新评估网络，让默认网络尽快切到所选通道。
+     * 只用 root 重新拉起该通道的连接，不改其它通道的开关状态。
+     * 返回实际执行的命令，未执行返回 null。
+     */
+    fun nudgeDefaultNetwork(channel: Int): String? {
+        val cmd = when (channel) {
+            WIFI -> "cmd wifi reconnect"
+            CELLULAR -> "svc data disable; sleep 1; svc data enable"
+            else -> null
+        } ?: return null
+        val out = RootUtils.exec(cmd) ?: return null
+        return cmd + (if (out.isEmpty()) "" else " => " + out.lineSequence().first())
+    }
 }
