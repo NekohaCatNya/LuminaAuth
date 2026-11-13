@@ -172,10 +172,14 @@ export ANDROID_HOME=/path/to/android-sdk
 ## 版本
 
 - versionName：**1.1.4**
-- versionCode：**213**
+- versionCode：**214**
 - applicationId：`com.luminaauth`
 
 ## 更新记录
+
+### v1.1.4-vc214
+
+- 构建改为多架构分拆：`arm64-v8a` / `armeabi-v7a` / `x86` / `x86_64` 四个 ABI 各自出包，另出 `universal`（全架构整合）包，任选其一安装即可。
 
 ### v1.1.4-vc213
 

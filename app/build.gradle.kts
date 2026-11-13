@@ -13,7 +13,7 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = 36
-        versionCode = 213
+        versionCode = 214
         versionName = "1.1.4"
 
         externalNativeBuild {
@@ -21,15 +21,22 @@ android {
                 arguments += listOf("-DANDROID_STL=c++_static")
             }
         }
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
     }
 
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    splits {
+        // 多架构分拆：4 个 ABI 各自出包 + 一个 universal 全架构整合包
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
         }
     }
 
