@@ -1,245 +1,124 @@
 # LuminaAuth
 
-![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)
-![Platform](https://img.shields.io/badge/Android-10%2B-green)
-![Kotlin](https://img.shields.io/badge/Kotlin-2.4.10-7f52ff)
+校园网自动登录 Android 应用。连上目标校园网 WiFi 后自动完成 Portal 认证（DrCOM / 锐捷 / 深澜 / H3C 等），不用每次手动开浏览器输账号密码。认证差异全部由 **外置 YAML 插件** 描述，插件是纯数据，不含可执行代码。
 
-校园网自动登录 Android 应用。连接到目标校园网 WiFi 后，自动完成 Web 认证（DrCOM / 锐捷 / 深澜 / H3C 等 Portal 页面），无需每次手动打开浏览器输入账号密码。
+- 包名 `com.luminaauth` · minSdk 29 / targetSdk 36 / compileSdk 37
+- 当前版本 **vc244 / 1.1.5**，固定 release 证书，支持直接覆盖升级
+- UI：Jetpack Compose + miuix-kmp + 液态玻璃（Dock 参考 HyperIsland）
 
-不同学校、不同运营商线路的认证差异全部通过 **YAML 插件** 描述：插件只是纯数据配置，不包含可执行代码，由应用内置的运行时在网络沙箱内发起请求，安全可控。
+## 功能
 
-## 功能特性
+- **自动认证**：匹配校园网 WiFi 后自动登录，断线自动重连
+- **插件外置**：APK 不内置任何插件，`.plugin.yaml` 单独分发、随时导入
+- **SSID 由 App 管**：插件不再写死网络名，校园网 WiFi 名称在设置里配置
+- **通知检测模式**：监听系统「登录到 WLAN 网络」通知，捕获即触发认证
+- **增强模式**：Root / Shizuku 提权，后台检测更可靠，可一次性切换默认网络
+- **前台服务**：常驻通知实时显示状态，单条通知增量更新
+- **认证提速**：IP 就绪即走、250ms 轮询、通知模式跳过等待
+- **液态玻璃 UI**：设置页同款玻璃顶栏、玻璃对话框、可下沉 Dock
+- **记住密码 / 主题配色 / 高刷渲染 / 崩溃日志捕获**
 
-- 🔐 **自动认证**：连接匹配的校园网 WiFi 后自动完成登录，断线自动重连
-- 🧩 **YAML 插件体系（外置）**：认证地址、表单字段、运营商线路、时序/通道/重试策略全部声明式配置，插件单独分发、App 不内置
-- 📶 **SSID 自动匹配**：连接到插件声明的 WiFi 才触发，也可设为任意网络
-- 🛗 **ISP 运营商分段选择**：学生 / 教职工等多账号类型，液态玻璃分段组件一键切换（仅 1 个选项时自动隐藏）
-- 📡 **通知检测模式**：监听系统「登录到 WLAN 网络」等网关通知，捕获即触发认证，不依赖 WiFi 广播
-- 🦸 **增强模式**：支持 Root / Shizuku 提权，后台可靠检测网络状态、提升进程优先级
-- 🔔 **前台服务守护**：常驻通知实时显示认证状态，单条通知增量更新
-- 🎨 **液态玻璃 UI**：基于 Jetpack Compose + miuix-kmp + AndroidLiquidGlass，部分交互思路参考 SukiSU Ultra
-- 🌈 **主题与配色**：主题色 / 状态色 / 玻璃元素各自独立调色板，可逐项自定义并持久化
-- 🚀 **高刷流畅渲染**：解锁高刷新率，列表按行懒加载，翻页 / 滑动稳定跟手
-- 🔑 **记住密码**：账号凭据本地加密持久化存储
+## 安装与首次使用
 
-## 截图
+1. 安装 `LuminaAuth-1.1.5-vc244-<abi>.apk`（不确定架构就装 `universal`）。
+2. 打开 App，授予定位（读 WiFi 名）、通知、电池优化等权限。
+3. 到「设置 → 高级设置 → 插件 → 导入插件」导入 `drcom-default.plugin.yaml`，点选为「使用中」。
+4. 在设置里填写校园网 WiFi 名称（多个用逗号分隔），然后打开「自动认证」。
 
-<!-- 将截图放入 docs/ 目录后在此引用，例如：
-![主页](docs/home.png)
-![日志](docs/log.png)
-![设置](docs/settings.png)
--->
+> 插件不再随 APK 内置；没导入插件时登录会以“插件未配置”失败，插件卡片会直接提示。
 
-## 下载
+## 插件 YAML 速查
 
-前往 [Releases](https://github.com/NekohaCatNya/LuminaAuth/releases) 下载最新的 `LuminaAuth-*-release.apk` 安装即可。应用已使用固定 release 证书签名，可直接覆盖升级。
-
-## 使用方法
-
-1. 安装并打开应用，授予定位、通知、电池优化等必要权限（用于识别 WiFi 名称与后台保活）。
-2. **插件不再随 APK 内置**：先到「高级设置 → 插件 → 导入插件」导入随包单独发布的 `.plugin.yaml`（例如 `drcom-default.plugin.yaml`）。
-3. 插件里不再写默认 SSID，校园网 WiFi 名称请在 App 设置中自行填写。
-3. 输入校园网账号密码，可选择「记住密码」。
-4. 开启「自动认证」，之后连接校园网 WiFi 即会自动登录。
-
-## YAML 插件体系
-
-插件为**纯数据、零代码**：加载插件不会执行任何脚本，所有请求由内置运行时 `PluginRuntime` 处理，并被限制在插件声明的主机白名单（沙箱）内。
-
-### 顶层结构
-
-| 字段 | 说明 |
-|---|---|
-| `id` | 插件唯一标识 |
-| `name` / `description` | 显示名称与描述 |
-| `version` | 插件版本号（整数） |
-| `network.ssid` | 触发认证的 WiFi 名称列表（子串匹配）；留空表示任意网络 |
-| `sandbox.hosts` | **沙箱白名单**，所有请求只能发往这些 `host:port`，端口必须与实际请求一致 |
-| `fields` | 登录表单字段，动态渲染输入框；`type` 为 `text` / `password` |
-| `isps` | 运营商账号类型列表；`default: true` 为默认选中，≥2 项才显示选择器 |
-| `check` | 在线状态探测：`online_when` / `offline_when` 用 `contains` 判定 |
-| `login.steps` | 登录请求步骤，支持多步串行与变量捕获 |
-
-### 模板变量
-
-可在任意请求 URL 中使用 `${...}` 占位符，运行时自动替换：
-
-| 变量 | 含义 |
-|---|---|
-| `${username}` / `${password}` | 用户在表单中输入的内容（也可用任意自定义 field 的 `id`） |
-| `${isp}` | 当前选中的 ISP 的 `id`（运营商后缀） |
-| `${ip}` | 本机局域网 IP |
-| `${rand}` | 每次运行生成的随机数（1000–9999） |
-| 上一步 `capture` 的变量 | 从前序响应中按 JSONPath / 正则提取，供后续步骤使用 |
-
-### 步骤结果判定
-
-- `success_when`：`contains`（包含文本）/ `regex`（正则）/ `json.path` + `json.equals`（JSONPath 比对）
-- `already_online_when`：已在线判定
-- `expect_status`：期望的 HTTP 状态码
-- `capture`：从响应中提取变量（`json_path` 或 `regex` + `group`）
-- `fail.json_path`：失败时从该 JSONPath 读取服务器错误提示
-
-### 完整示例
+插件只能访问 `sandbox.hosts` 白名单内的主机，请求由沙箱发出。
 
 ```yaml
-id: drcom-example
-name: DrCOM 校园网认证
-version: 1
-description: DrCOM ePortal Web 认证示例
+id: drcom-default
+name: DrCOM 默认校园网认证
+version: 2
 
-network:
-  ssid:
-    - Campus-WiFi
+timing:                 # 可选，认证时序
+  ip_poll_ms: 250
+  max_ip_wait_ms: 3000
+  skip_network_ready_on_notify: true
+
+network:                # 可选，ssid 不写就不按网络名匹配
+  ssid: [ChinaNet-JLZG, JLZG-5G]
+  bind_process: true
+  promote_network: true
+  root_set_default: true
+  preferred_ifaces: [wlan0, rmnet, eth0]
+
+detect:                 # 可选，重试策略
+  retry_count: 3
+  retry_delay_ms: 5000
 
 sandbox:
-  hosts:
-    - 192.168.1.100:80
+  hosts: [218.6.130.195:801, 218.6.130.195:1333]
 
 fields:
-  - id: username
-    name: 用户名
-    type: text
-    required: true
-  - id: password
-    name: 密码
-    type: password
-    required: true
+  - { id: username, name: 用户名, type: text, required: true }
+  - { id: password, name: 密码, type: password, required: true }
 
 isps:
-  - id: student
-    name: 学生账号
-    default: true
-  - id: staff
-    name: 教职工账号
+  - { id: after, name: 教职工 }
 
 check:
   method: GET
-  url: "http://192.168.1.100/chkstatus"
-  online_when:
-    contains: '"result":1'
-  offline_when:
-    contains: '"result":0'
+  url: "http://218.6.130.195:1333/drcom/chkstatus?..."
+  online_when:  { contains: '"result":1' }
+  offline_when: { contains: '"result":0' }
 
 login:
   steps:
     - name: auth
       method: GET
-      url: "http://192.168.1.100/portal/login?user=${username}@${isp}&pwd=${password}&ip=${ip}&v=${rand}"
-      expect_status: 200
-      success_when:
-        json:
-          path: result
-          equals: "1"
-      already_online_when:
-        contains: "已经在线"
-      fail:
-        json_path: msg
+      url: "http://218.6.130.195:801/eportal/portal/login?...&user_account=,1,${username}@${isp}&user_password=${password}&wlan_user_ip=${ip}&v=${rand}"
+      success_when: { json: { path: result, equals: "1" } }
+      already_online_when: { contains: "已经在线" }
+      fail: { json_path: msg }
 ```
 
-## 通知监听自动恢复
+字段规则：
 
-国产 ROM（MIUI / HyperOS / ColorOS / OriginOS 等）在进程被杀或重启后，可能断开 `NotificationListenerService` 的系统绑定，导致收不到网关通知。应用内置多级自动恢复：
+- `timing` / `detect` 可整段省略，缺省值等价旧行为；`network` 里除 `ssid` 外的策略键也都可选。
+- `ssid` 为空或整段删掉 = 不按网络名匹配，不会误触发任何 WiFi。
+- `login.steps` 至少一步；模板变量 `${username}` `${password}` `${isp}` `${ip}` `${rand}`，以及 `capture` 捕获出的变量。
+- `success_when` 支持 `contains` / `regex` / `json: {path, equals}`；未知键会报错并指出具体键名。
 
-1. **官方 API 重绑**：`requestRebind`（部分 ROM 有效）。
-2. **组件开关 toggle**：切换监听器启用状态触发系统重连，无需权限，全 ROM 通用。
-3. **Root 强绑**：增强模式 + Root 时执行 `cmd notification allow_listener`。
+## 网络通道说明
 
-触发时机：每次启动自动重绑（延迟约 1.2s）、设置页每 3 秒轮询监听状态、前台服务运行中断开即重连；流程带冷却与全局互斥，避免高频触发。
+| 能力 | 普通模式 | 增强模式（Root / Shizuku） |
+| --- | --- | --- |
+| 指定发包网卡 / 绑定本进程流量 | ✅ | ✅ |
+| 请求系统重评估所选通道（3s 冷却，只一次） | ✅（可能被系统拒绝） | ✅ |
+| 一次性切全局默认网络（`ndc`） | ❌ | ✅（失败自动回退） |
+| 守护式锁路由 | 不做 | 不做 |
 
-## 技术栈
+普通 App 无权改全局默认路由；想让整机流量强制走某条通道，需要增强模式 + Root，且系统仍可能自行回切。
 
-- **UI**：Jetpack Compose（BOM 2026.08.00）
-- **组件 / 模糊**：miuix-kmp 0.9.4
-- **液态玻璃**：AndroidLiquidGlass / backdrop（Kyant0）
-- **提权**：Shizuku 13.1.5（可选 Root）
-- **最低系统**：Android 10（API 29）
-- **目标系统**：Android 16（API 36）
-- **编译 SDK**：Android 17（API 37）
-- **构建**：Gradle 9.5.0 + AGP 9.3.2 + Kotlin 2.4.10
-
-## 从源码构建
-
-需要 JDK 17 与 Android SDK（含 platform 37、build-tools 37）。
+## 构建
 
 ```bash
-export JAVA_HOME=/path/to/jdk-17
-export ANDROID_HOME=/path/to/android-sdk
-./gradlew :app:assembleRelease
+JAVA_HOME=/path/to/jdk-17 PATH=$JAVA_HOME/bin:$PATH \
+ANDROID_HOME=/path/to/android-sdk \
+./gradlew assembleRelease --offline
 ```
 
-产物位于 `app/build/outputs/apk/release/`。签名使用 `schoolautologin-release.keystore`（alias = `schoolautologin`）；请勿将自己的密钥提交到公开仓库。
+- R8 开启（`isMinifyEnabled` / `isShrinkResources`），keep 规则见 `app/proguard-rules.pro` 与 `R8-类名映射.md`；
+- 4GB 内存机器请保持 `gradle.properties` 的 `-Xmx1792m`、`android.enableR8.fullMode=false`，否则 R8 阶段会被 OOM 杀掉；
+- 签名：`schoolautologin-release.keystore`（alias `schoolautologin`），`v1 + v2`，v3-only 在 MIUI 会报安装失败 (33)；
+- 离线依赖：`libs-maven/`（Compose 1.13 等），联网构建可忽略。
 
-## 版本
+## 日志与排错
 
-- versionName：**1.1.5**
-- versionCode：**219**
-- applicationId：`com.luminaauth`
+日志页：自动滚动 / 导出 / 清空，540dp 固定预览框内独立滚动。
 
-## 更新记录
+- `PLUGIN active_fallback reason=no_plugins`：还没导入插件；
+- `PLUGIN load_fail ... err=...`：插件解析失败，会写明哪个键、第几项；
+- `AUTH begin ... notify=true`：本次是否通知模式触发；
+- `NET promote ch=... result=requested / denied / root:set:<id>`：网络重评估结果；
+- `NET bind_process ok=0`：进程绑定失败（通道不可用或被系统限制）。
 
-### v1.1.5-vc219
+## License
 
-- 认证 HTTP 真正落到 C++：`native_http.cpp` 重写为完整的 `httpRequest()`（GET/POST、`Content-Length`、`Transfer-Encoding: chunked` 解码、非阻塞 connect + 读写超时、512KB 响应上限），并新增 JNI 导出 `nativeHttpRequest`（之前 Kotlin 里声明了 `nativeHttpGet` 但 C++ 侧根本没实现，属于死代码）。
-- `SandboxHttp` 在 scheme 为 http 且已绑定网卡时走原生 socket，靠 `SO_BINDTODEVICE` 直接锁 wlan0 出站，绕开系统默认路由；原生失败自动回退 Java 并记 `native_http fallback` 详细日志。https 仍由 Java 层负责（原生裸 socket 不做 TLS）。
-- 安全边界不变：scheme 校验与 host 白名单仍在 Kotlin 侧，原生只负责传输。
-- `NetworkChannel` 增加 `boundIface`，绑定变化时同步更新，原生层可直接取网卡名。
-
-### v1.1.5-vc218
-
-- 修复「发送通道」绑定失败：冷启动时 `requestNetwork` 回调常常等不到，导致 Java HTTP 仍走蜂窝默认路由（源地址 10.39.x.x），内网认证服务器 `218.6.130.195:1333` 8 秒超时。
-  改为先同步枚举现有网络（`ConnectivityManager.allNetworks` + 传输类型匹配）直接拿到 `Network` 与网卡名，并注册常驻监听，WiFi 晚到也能自动补绑。
-- 每次认证尝试前重新刷新一次通道绑定，并在日志里记录 `attempt=N ch=WiFi iface=wlan0`，绑定失败一眼可见。
-
-### v1.1.5-vc217
-
-- 版本号升级到 1.1.5，随多架构分包一同发布。
-
-### v1.1.4-vc216
-
-- 修复应用内自动更新选错安装包：多架构发行版下按当前安装包自身 ABI 挑选对应的分架构 APK（`*-arm64-v8a.apk` 等），整合包安装的用户优先拿 `*-universal.apk`，旧版无后缀的包作为兜底。
-
-### v1.1.4-vc214
-
-- 构建改为多架构分拆：`arm64-v8a` / `armeabi-v7a` / `x86` / `x86_64` 四个 ABI 各自出包，另出 `universal`（全架构整合）包，任选其一安装即可。
-
-### v1.1.4-vc213
-
-- 新增：增强模式（root）下认证成功后自动催促系统重新评估网络，让默认网络尽快切到所选发送通道，随后重新绑定一次；本就是「已在线」时不触发，避免打断现有连接。
-
-### v1.1.4-vc212
-
-- 「发送通道」改回固定三项（WiFi / 移动数据 / 以太网），取消运行时扫描与动态列表，避免下拉重复项。
-- 后台服务冷启动时也会按已保存通道绑定一次，未打开界面同样生效。
-
-### v1.1.4-vc211
-
-- 修复「发送通道」下拉列表同一网络通道重复出现多条的问题：扫描回调按通道类型去重，每个通道只保留一项。
-
-### v1.1.4-vc210
-
-- 修复未认证门户下沙箱 HTTP 误走移动数据导致探测超时：保留选中通道对应的 Android `Network`，沙箱请求优先从该 Network 出站，避免校园网内网认证服务器经蜂窝出口不可达。
-
-### v1.1.4-vc209
-
-- 修复后台服务冷启动（进程被回收后由广播 / 定时拉起、尚未打开界面）时未挂接 `AppContext`，认证线程调用 `AppContext.get()` 空指针导致整次认证在进入插件沙箱前失败的问题。
-- 认证异常捕获放宽到 `Throwable`，并将完整堆栈写入详情日志，便于后续定位具体行号。
-
-### v1.1.4-vc208
-
-- 液态玻璃开关（LiquidToggle）拨动增加震动反馈，对齐 MIUI-X 交互手感。
-
-### v1.1.4-vc207
-
-- 新增动态网络通道扫描（WiFi / 移动数据 / 以太网），可选发送通道；C++ 侧按选中网卡 `SO_BINDTODEVICE` 绑定 socket。
-
-## 开源协议
-
-本项目基于 **GNU GPL-3.0-or-later** 协议开源，详见 [LICENSE](LICENSE)。
-
-致谢以下开源项目（各项目具体协议以其官方仓库 LICENSE 为准）：
-
-- [SukiSU Ultra](https://github.com/SukiSU-Ultra/SukiSU_Ultra)（Pager 状态、液态 Dock、卡片等适配参考，GPL-3.0）
-- [miuix-kmp](https://github.com/YuKongA/miuix-kmp)（Miuix 组件与模糊）
-- [AndroidLiquidGlass](https://github.com/kyant0/AndroidLiquidGlass)（液态玻璃效果）
-- [Shizuku](https://github.com/RikkaApps/Shizuku)（非 Root 提权）
+GPL-3.0-or-later
