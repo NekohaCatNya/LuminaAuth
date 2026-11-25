@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.luminaauth.plugin.PluginManager
 import java.net.NetworkInterface
 import java.util.Collections
 
@@ -213,6 +214,7 @@ class AutoLoginService : Service() {
                     pendingSsid = null
                     if (!ssid.isNullOrEmpty() && !"<unknown ssid>".equals(ssid, ignoreCase = true)) {
                         AuthGlobalState.setStatus(AuthStatus.NEED_AUTH)
+                        fastAuthRequested = true
                         LogBuffer.add("NTFY", "trigger=auth ssid=$ssid")
                         LogBuffer.addDetail("AUTH", "start src=notify ssid=$ssid")
                         performAutoLogin(ssid)
@@ -582,19 +584,28 @@ class AutoLoginService : Service() {
             lastLoginAt = now
         }
 
+        val plugin = try { PluginManager.active(this) } catch (_: Throwable) { null }
+        val timing = plugin?.timing ?: com.luminaauth.plugin.TimingDef()
+        val detect = plugin?.detect ?: com.luminaauth.plugin.DetectDef()
+        val policy = plugin?.policy ?: com.luminaauth.plugin.NetworkPolicyDef()
+        try { NetworkChannel.preferredIfaces = policy.preferredIfaces } catch (_: Throwable) {}
+
         val username = cfg[0]
         val password = cfg[1]
         val isp = "after"
 
         LogBuffer.add("MON", "campus=enter ssid=$ssid act=auth")
-        LogBuffer.addDetail("AUTH", "begin ssid=$ssid isp=$isp user=${maskAccount(username)}")
-        updateStatus(this, "校园网自动认证", "检测到 $ssid，正在等待网络就绪...")
+        val notifyMode = PrefUtils.isNotifyDetectEnabled(this)
+        val skipReady = notifyMode && timing.skipNetworkReadyOnNotify
+        LogBuffer.addDetail("AUTH", "begin ssid=$ssid isp=$isp user=${maskAccount(username)} notify=$notifyMode")
+        updateStatus(this, "校园网自动认证",
+            if (notifyMode) "检测到 $ssid，正在认证..." else "检测到 $ssid，正在等待网络就绪...")
 
         Thread {
             var success = false
             var message = "未知错误"
             try {
-                if (!waitForWifiReady(WIFI_READY_TIMEOUT_MS.toLong())) {
+                if (!skipReady && !waitForWifiReady(WIFI_READY_TIMEOUT_MS.toLong(), timing.ipPollMs)) {
                     message = "WiFi 网络尚未就绪，稍后自动重试"
                     LogBuffer.add("AUTH", "wifi_ready=timeout retry=auto")
                     LogBuffer.addDetail("AUTH", "abort reason=wifi_ready_timeout")
@@ -602,17 +613,20 @@ class AutoLoginService : Service() {
                     notifyResult(false, message)
                     return@Thread
                 }
-                val skipStableBuffer = fastAuthRequested
+                val skipStableBuffer = fastAuthRequested || skipReady
                 fastAuthRequested = false
                 if (!skipStableBuffer) {
-                    try { Thread.sleep(PrefUtils.getWaitTimeMs(this@AutoLoginService)) } catch (_: InterruptedException) { return@Thread }
+                    // 原来是无脑 sleep，现在是“IP 一就绪就走”，最多等配置的时长
+                    waitUntilIpReady(PrefUtils.getWaitTimeMs(this@AutoLoginService), timing.ipPollMs)
                 }
 
-                for (attempt in 1..MAX_ATTEMPTS) {
+                val attempts = detect.retryCount.coerceIn(1, 10)
+                val retryDelay = detect.retryDelayMs.coerceIn(200L, 60000L)
+                for (attempt in 1..attempts) {
                     if (attempt > 1) {
-                        try { Thread.sleep(RETRY_INTERVAL_MS) } catch (_: InterruptedException) { break }
+                        try { Thread.sleep(retryDelay) } catch (_: InterruptedException) { break }
                     }
-                    updateStatus(this, "校园网自动认证", "正在认证（第 $attempt/$MAX_ATTEMPTS 次）...")
+                    updateStatus(this, "校园网自动认证", "正在认证（第 $attempt/$attempts 次）...")
 
                     // 每次尝试前刷新一次通道绑定：冷启动时 WiFi 可能还没就绪，第一次绑不上
                     try {
@@ -624,7 +638,10 @@ class AutoLoginService : Service() {
                     } catch (_: Throwable) {
                     }
 
-                    val ip = waitForValidIp(NETWORK_READY_TIMEOUT_MS.toLong())
+                    val ip = waitForValidIp(
+                        minOf(NETWORK_READY_TIMEOUT_MS.toLong(), timing.maxIpWaitMs.coerceAtLeast(500L)),
+                        timing.ipPollMs
+                    )
                     if (ip == null) {
                         message = "IP 未分配，等待重试"
                         LogBuffer.addDetail("AUTH", "attempt=$attempt ip=na")
@@ -662,6 +679,10 @@ class AutoLoginService : Service() {
                 LogBuffer.addDetail("STATE", "auth_done ok=${if (success) 1 else 0} ->${AuthGlobalState.currentStatus}")
                 if (success || "已在线，无需操作" == message) clearCampusNotifications()
                 if (success) {
+                    if (policy.bindProcess) {
+                        val ok = NetworkChannel.bindProcessTo(NetworkChannel.boundNetwork)
+                        LogBuffer.add("NET", "bind_process ok=${if (ok) 1 else 0}")
+                    }
                     // 本来就是已在线时不重连，避免把现有连接打断
                     if ("已在线，无需操作" != message) promoteSelectedChannel()
                     handler?.postDelayed({
@@ -685,16 +706,13 @@ class AutoLoginService : Service() {
      */
     private fun promoteSelectedChannel() {
         try {
-            if (!PrefUtils.isEnhancedModeEnabled(this)) return
-            if (!RootUtils.isRootAvailable()) return
             val ch = PrefUtils.getNetChannel(this).coerceIn(0, NetworkChannel.labels.lastIndex)
             val label = NetworkChannel.labels.getOrElse(ch) { "na" }
-            val r = NetworkChannel.nudgeDefaultNetwork(ch)
-            if (r == null) {
-                LogBuffer.add("NET", "promote skip ch=$label")
-                return
-            }
-            LogBuffer.add("NET", "promote ch=$label cmd=$r")
+            val plugin = try { PluginManager.active(this) } catch (_: Throwable) { null }
+            val policy = plugin?.policy ?: com.luminaauth.plugin.NetworkPolicyDef()
+            val r = NetworkChannel.promoteOnce(ch, policy.promoteNetwork, policy.rootSetDefault)
+            LogBuffer.add("NET", "promote ch=$label result=$r")
+            if (r.startsWith("skip") || r.startsWith("denied")) return
             handler?.postDelayed({
                 try {
                     val iface = NetworkChannel.applyChannel(ch)
@@ -781,7 +799,7 @@ class AutoLoginService : Service() {
         return false
     }
 
-    private fun waitForWifiReady(timeoutMs: Long): Boolean {
+    private fun waitForWifiReady(timeoutMs: Long, stepMs: Long = 250L): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val ssid = getCurrentSsid()
@@ -789,17 +807,27 @@ class AutoLoginService : Service() {
                 val ip = LoginService.getLocalIPv4(this)
                 if (isValidIp(ip)) return true
             }
-            try { Thread.sleep(1000) } catch (_: InterruptedException) { break }
+            try { Thread.sleep(stepMs.coerceIn(50L, 1000L)) } catch (_: InterruptedException) { break }
         }
         return false
     }
 
-    private fun waitForValidIp(timeoutMs: Long): String? {
+    /** 稳定性等待：IP 有效就立刻返回，不再死等满配置时长。 */
+    private fun waitUntilIpReady(maxMs: Long, stepMs: Long = 250L) {
+        if (maxMs <= 0L) return
+        val deadline = System.currentTimeMillis() + maxMs
+        while (System.currentTimeMillis() < deadline) {
+            if (isValidIp(LoginService.getLocalIPv4(this))) return
+            try { Thread.sleep(stepMs.coerceIn(50L, 1000L)) } catch (_: InterruptedException) { return }
+        }
+    }
+
+    private fun waitForValidIp(timeoutMs: Long, stepMs: Long = 250L): String? {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             val ip = LoginService.getLocalIPv4(this)
             if (isValidIp(ip)) return ip
-            try { Thread.sleep(1000) } catch (_: InterruptedException) { break }
+            try { Thread.sleep(stepMs.coerceIn(50L, 1000L)) } catch (_: InterruptedException) { break }
         }
         val ip = LoginService.getLocalIPv4(this)
         return if (isValidIp(ip)) ip else null

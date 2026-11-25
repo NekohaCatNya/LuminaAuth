@@ -21,6 +21,9 @@ data class Plugin(
     val loginSteps: List<StepDef>,
     val source: PluginSource,
     val fileName: String,
+    val timing: TimingDef = TimingDef(),
+    val policy: NetworkPolicyDef = NetworkPolicyDef(),
+    val detect: DetectDef = DetectDef(),
 ) {
     companion object {
         const val FIELD_USERNAME = "username"
@@ -29,6 +32,34 @@ data class Plugin(
 }
 
 enum class PluginSource { BUILTIN, EXTERNAL }
+
+/** 认证时序：把原来写死在代码里的等待参数交给插件声明。 */
+data class TimingDef(
+    /** IP 就绪轮询步长（毫秒）。 */
+    val ipPollMs: Long = 250L,
+    /** 等待 IP 就绪的上限（毫秒）。 */
+    val maxIpWaitMs: Long = 3000L,
+    /** 通知检测模式触发时，直接跳过“等待网络就绪”整段。 */
+    val skipNetworkReadyOnNotify: Boolean = true,
+)
+
+/** 通道与出口策略。 */
+data class NetworkPolicyDef(
+    /** 认证成功后把本进程流量绑定到所选通道。 */
+    val bindProcess: Boolean = true,
+    /** 认证成功后请求系统对所选通道重评估（克制版，带冷却）。 */
+    val promoteNetwork: Boolean = true,
+    /** 增强模式 + root 时，一次性把默认网络切到所选通道（不做守护）。 */
+    val rootSetDefault: Boolean = true,
+    /** 优先网卡名（如 wlan0 / rmnet0 / eth0），为空则按传输类型挑。 */
+    val preferredIfaces: List<String> = emptyList(),
+)
+
+/** 检测与重试。 */
+data class DetectDef(
+    val retryCount: Int = 3,
+    val retryDelayMs: Long = 5000L,
+)
 
 enum class FieldType { TEXT, PASSWORD }
 

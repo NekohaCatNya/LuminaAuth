@@ -148,6 +148,12 @@ object PrefUtils {
     @JvmStatic fun getThemeMode(context: Context): Int =
         prefs(context).getInt(KEY_THEME_MODE, 0)
 
+    @JvmStatic fun isMonetEnabled(context: Context): Boolean =
+        prefs(context).getBoolean("monet_enabled", true)
+
+    @JvmStatic fun setMonetEnabled(context: Context, enabled: Boolean) =
+        prefs(context).edit().putBoolean("monet_enabled", enabled).apply()
+
     @JvmStatic fun setThemeMode(context: Context, mode: Int) =
         prefs(context).edit().putInt(KEY_THEME_MODE, mode).apply()
 

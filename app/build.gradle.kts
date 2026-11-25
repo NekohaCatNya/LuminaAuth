@@ -13,7 +13,7 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = 36
-        versionCode = 219
+        versionCode = 244
         versionName = "1.1.5"
 
         externalNativeBuild {
@@ -46,6 +46,10 @@ android {
             storePassword = "schoolautologin123"
             keyAlias = "schoolautologin"
             keyPassword = "schoolautologin123"
+            // v3-only 会被部分 MIUI 安装器判为“解析软件包时出现问题(33)”，强制走 v2
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = false
         }
     }
 
@@ -91,20 +95,26 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
-    implementation(platform("androidx.compose:compose-bom:2026.08.00"))
+    implementation(platform("androidx.compose:compose-bom:2026.11.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
-    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
-    implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
-    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
-    implementation(files("libs/miuix-preference-android-0.9.4.aar"))
+    implementation(files("libs/miuix-ui.aar"))
+    implementation(files("libs/miuix-icons.aar"))
+    implementation(files("libs/miuix-blur.aar"))
+    implementation(files("libs/miuix-glass.aar"))
+    implementation(files("libs/miuix-material.aar"))
+    implementation(files("libs/miuix-preference.aar"))
+    implementation(files("libs/miuix-core.aar"))
+    implementation(files("libs/miuix-squircle.aar"))
+    implementation(files("libs/miuix-shader.aar"))
+    implementation(files("libs/material-color-utilities.aar"))
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
-    implementation("io.github.kyant0:backdrop:1.0.6")
-    implementation("io.github.kyant0:shapes:1.2.0")
+    implementation("io.github.kyant0:backdrop:1.0.6") { isTransitive = false }
+    implementation("io.github.kyant0:shapes:1.2.0") { isTransitive = false }
     // 开源多线程下载引擎（分片并发 + 断点续传）
     implementation("com.liulishuo.filedownloader:library:1.7.7")
 

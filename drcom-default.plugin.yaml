@@ -1,16 +1,25 @@
 id: drcom-default
 name: DrCOM 默认校园网认证
-version: 1
-description: DrCOM ePortal web auth default plugin
+version: 2
+description: DrCOM ePortal web auth 默认插件（不含默认 SSID，网络名请在 App 设置里配置）
 
+# 认证时序（不写则用内置默认值）
+timing:
+  ip_poll_ms: 250                       # IP 就绪轮询步长（毫秒）
+  max_ip_wait_ms: 3000                  # 等待 IP 就绪上限（毫秒）
+  skip_network_ready_on_notify: true    # 通知检测模式触发时跳过“等待网络就绪”
+
+# 通道与出口策略
 network:
-  ssid:
-    - ChinaNet-JLZG
-    - ChinaNet-JLZG-5G
-    - ChinaNet-JLZG-2.4G
-    - JLZG
-    - JLZG-5G
-    - JLZG-2.4G
+  bind_process: true                    # 认证成功后把本进程流量绑定到所选通道
+  promote_network: true                 # 认证后请求系统对所选通道重评估（3 秒冷却，不循环）
+  root_set_default: true                # 增强模式 + root：一次性把默认网络切到所选通道（无守护）
+  preferred_ifaces: [wlan0, rmnet, eth0] # 优先网卡名，空则按传输类型挑
+
+# 检测与重试
+detect:
+  retry_count: 3
+  retry_delay_ms: 5000
 
 sandbox:
   hosts:

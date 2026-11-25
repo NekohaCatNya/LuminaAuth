@@ -19,6 +19,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.luminaauth.PrefUtils
 import com.luminaauth.ThemeUtils
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.Colors
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 
@@ -203,6 +206,24 @@ fun resetCategory(context: Context, category: PaletteCategory) {
     PaletteRoles.byCategory(category).forEach { resetRole(context, it) }
 }
 
+/** 进程级主题状态：切浅色/深色时直接改这里，所有正在显示的主题树立即重组（不重建页面） */
+object AppThemeState {
+    var mode by androidx.compose.runtime.mutableStateOf<Int?>(null)
+        private set
+    var monet by androidx.compose.runtime.mutableStateOf<Boolean?>(null)
+        private set
+
+    fun setMode(context: Context, value: Int) {
+        mode = value
+        PrefUtils.setThemeMode(context, value)
+    }
+
+    fun setMonet(context: Context, value: Boolean) {
+        monet = value
+        PrefUtils.setMonetEnabled(context, value)
+    }
+}
+
 /** 全局 CompositionLocal：Composable 一律通过 LocalAppColors.current 取色 */
 val LocalAppColors = compositionLocalOf { defaultAppColors(isDark = false) }
 
@@ -223,7 +244,7 @@ fun LuminaAuthTheme(content: @Composable () -> Unit) {
     DisposableEffect(Unit) {
         val prefs = PrefUtils.prefs(context)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == KEY_THEME_MODE || (key != null && key.startsWith(PrefUtils.PALETTE_KEY_PREFIX))) {
+            if (key == KEY_THEME_MODE || key == "monet_enabled" || (key != null && key.startsWith(PrefUtils.PALETTE_KEY_PREFIX))) {
                 tick++
             }
         }
@@ -231,8 +252,15 @@ fun LuminaAuthTheme(content: @Composable () -> Unit) {
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
-    val mode = remember(tick) { PrefUtils.getThemeMode(context) }
-    val isDarkNullable: Boolean? = remember(tick) { ThemeUtils.getIsDark(context) }
+    // 主题模式直接读进程级状态，写入即触发所有页面重组，无需退出重进
+    val savedMode = remember(tick) { PrefUtils.getThemeMode(context) }
+    val savedDark = remember(tick) { ThemeUtils.getIsDark(context) }
+    val liveMode = AppThemeState.mode
+    val mode = liveMode ?: savedMode
+    val monetEnabled = AppThemeState.monet ?: remember(tick) { PrefUtils.isMonetEnabled(context) }
+    val isDarkNullable: Boolean? = if (liveMode != null) {
+        when (mode) { 1 -> false; 2 -> true; else -> null }
+    } else savedDark
     val systemDark = isSystemInDarkTheme()
     val isDark = isDarkNullable ?: systemDark
 
@@ -252,17 +280,64 @@ fun LuminaAuthTheme(content: @Composable () -> Unit) {
         onDispose { }
     }
 
-    val appColors = remember(tick, isDark) { resolveAppColors(context, isDark) }
+    val appColors = remember(tick, mode, isDark) { resolveAppColors(context, isDark) }
 
-    val controller = remember(tick, mode, isDark) {
-        ThemeController(
-            colorSchemeMode = ColorSchemeMode.MonetSystem,
-            keyColor = appColors.accent,
-            isDark = isDarkNullable,
-        )
+    val controller = remember(tick, mode, isDark, monetEnabled) {
+        val baseLight = noMonetLightScheme()
+        val baseDark = noMonetDarkScheme()
+        if (monetEnabled) {
+            // Monet：用当前调色板的强调色生成整套配色（与改造前一致）
+            ThemeController(
+                colorSchemeMode = ColorSchemeMode.MonetSystem,
+                keyColor = appColors.accent,
+                isDark = isDarkNullable,
+            )
+        } else {
+            // 关闭 Monet：走 MIUI / HyperOS 原生（miuix 默认）配色
+            ThemeController(
+                colorSchemeMode = when (mode) {
+                    1 -> ColorSchemeMode.Light
+                    2 -> ColorSchemeMode.Dark
+                    else -> ColorSchemeMode.System
+                },
+                lightColors = baseLight,
+                darkColors = baseDark,
+                isDark = isDarkNullable,
+            )
+        }
     }
 
     MiuixTheme(controller = controller) {
-        CompositionLocalProvider(LocalAppColors provides appColors, content = content)
+        // Monet 关闭时，所有自定义色一律回落到 MIUI / miuix 原生配色，避免混色 bug
+        val effectiveColors = if (monetEnabled) {
+            appColors
+        } else {
+            val scheme = MiuixTheme.colorScheme
+            AppColors(
+                accent = scheme.primary,
+                success = appColors.success,
+                warning = appColors.warning,
+                danger = appColors.danger,
+                controlAccent = scheme.primary,
+                glassContainer = scheme.surfaceContainer,
+                contentOnGlass = scheme.onSurface,
+                controlTrack = scheme.surfaceContainerHigh,
+            )
+        }
+        CompositionLocalProvider(LocalAppColors provides effectiveColors, content = content)
     }
 }
+
+
+// —— 非 Monet 模式：给页面 / 卡片拉开层级，避免整片纯白分不出框 ——
+private fun noMonetLightScheme(): Colors = lightColorScheme(
+    surface = Color(0xFFF3F3F7),
+    surfaceContainer = Color(0xFFFFFFFF),
+    surfaceContainerHigh = Color(0xFFE8E8EF),
+)
+
+private fun noMonetDarkScheme(): Colors = darkColorScheme(
+    surface = Color(0xFF0F0F12),
+    surfaceContainer = Color(0xFF1C1C21),
+    surfaceContainerHigh = Color(0xFF27272D),
+)

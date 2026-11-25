@@ -19,6 +19,10 @@ class AboutActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             LuminaAuthTheme {
+                com.luminaauth.ui.glass.BarBlurHost(
+                    enabled = top.yukonga.miuix.kmp.material.isRuntimeShaderSupported(),
+                    liquidGlassEnabled = true,
+                ) {
                 CompositionLocalProvider(LocalEnableBlur provides true) {
                     val pkgInfo = packageManager.getPackageInfo(packageName, 0)
                     val realVersionCode = pkgInfo.longVersionCode
@@ -65,6 +69,7 @@ class AboutActivity : ComponentActivity() {
                         }
                     )
                     AboutScreenMiuix(state = state, actions = actions)
+                }
                 }
             }
         }

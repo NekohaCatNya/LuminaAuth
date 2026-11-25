@@ -17,8 +17,13 @@ object PluginLoader {
     private val ROOT_KEYS = setOf(
         "id", "name", "version", "description", "network",
         "sandbox", "sandbox_hosts", "fields", "isps", "check", "login",
+        "timing", "detect",
     )
-    private val NETWORK_KEYS = setOf("ssid")
+    private val NETWORK_KEYS = setOf(
+        "ssid", "bind_process", "promote_network", "root_set_default", "preferred_ifaces",
+    )
+    private val TIMING_KEYS = setOf("ip_poll_ms", "max_ip_wait_ms", "skip_network_ready_on_notify")
+    private val DETECT_KEYS = setOf("retry_count", "retry_delay_ms")
     private val SANDBOX_KEYS = setOf("hosts")
     private val FIELD_KEYS = setOf("id", "name", "type", "required")
     private val ISP_KEYS = setOf("id", "suffix", "name", "label", "default")
@@ -75,6 +80,10 @@ object PluginLoader {
         checkKeys(login, LOGIN_KEYS, "login")
         val steps = readSteps(login["steps"], hosts)
 
+        val timing = readTiming(root.section("timing"))
+        val policy = readPolicy(network)
+        val detect = readDetect(root.section("detect"))
+
         return Plugin(
             id = id,
             name = name,
@@ -88,6 +97,9 @@ object PluginLoader {
             loginSteps = steps,
             source = source,
             fileName = fileName,
+            timing = timing,
+            policy = policy,
+            detect = detect,
         )
     }
 
@@ -369,6 +381,71 @@ object PluginLoader {
         checkKeys(map, FAIL_KEYS, "$where.fail")
         return map.str("json_path", "$where.fail")
             ?: throw PluginParseException("$where.fail.json_path 是空值：请填写失败信息在响应里的字段名")
+    }
+
+
+    // ---------------- 扩展段（缺省即默认值，旧插件无需改动） ----------------
+
+    private fun readTiming(section: Map<*, *>?): TimingDef {
+        if (section == null) return TimingDef()
+        checkKeys(section, TIMING_KEYS, "timing")
+        return TimingDef(
+            ipPollMs = section.longOr("ip_poll_ms", "timing", 250L).coerceIn(50L, 3000L),
+            maxIpWaitMs = section.longOr("max_ip_wait_ms", "timing", 3000L).coerceIn(0L, 30000L),
+            skipNetworkReadyOnNotify = section.boolOr("skip_network_ready_on_notify", "timing", true),
+        )
+    }
+
+    private fun readPolicy(network: Map<*, *>?): NetworkPolicyDef {
+        if (network == null) return NetworkPolicyDef()
+        return NetworkPolicyDef(
+            bindProcess = network.boolOr("bind_process", "network", true),
+            promoteNetwork = network.boolOr("promote_network", "network", true),
+            rootSetDefault = network.boolOr("root_set_default", "network", true),
+            preferredIfaces = readIfaces(network["preferred_ifaces"]),
+        )
+    }
+
+    private fun readIfaces(raw: Any?): List<String> {
+        if (raw == null) return emptyList()
+        val items: List<*> = when (raw) {
+            is List<*> -> raw
+            is Map<*, *> -> throw PluginParseException("network.preferred_ifaces 必须是数组（- wlan0），当前是键值映射")
+            else -> raw.toString().split(',')
+        }
+        return items.mapNotNull { it?.toString()?.trim()?.ifEmpty { null } }
+    }
+
+    private fun readDetect(section: Map<*, *>?): DetectDef {
+        if (section == null) return DetectDef()
+        checkKeys(section, DETECT_KEYS, "detect")
+        return DetectDef(
+            retryCount = section.longOr("retry_count", "detect", 3L).toInt().coerceIn(1, 10),
+            retryDelayMs = section.longOr("retry_delay_ms", "detect", 5000L).coerceIn(200L, 60000L),
+        )
+    }
+
+    private fun Map<*, *>.longOr(key: String, where: String, def: Long): Long {
+        if (!containsKey(key)) return def
+        val v = this[key] ?: return def
+        return when (v) {
+            is Number -> v.toLong()
+            else -> v.toString().trim().toLongOrNull()
+                ?: throw PluginParseException("$where.$key 必须是整数，当前是 \"$v\"")
+        }
+    }
+
+    private fun Map<*, *>.boolOr(key: String, where: String, def: Boolean): Boolean {
+        if (!containsKey(key)) return def
+        return when (val v = this[key]) {
+            null -> def
+            is Boolean -> v
+            else -> when (v.toString().trim().lowercase()) {
+                "true", "yes", "1" -> true
+                "false", "no", "0" -> false
+                else -> throw PluginParseException("$where.$key 不是布尔值：只能是 true 或 false")
+            }
+        }
     }
 
     // ---------------- URL 白名单 ----------------

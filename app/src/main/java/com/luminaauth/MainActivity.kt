@@ -16,6 +16,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +28,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +38,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.offset
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -63,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.onSizeChanged
@@ -70,6 +77,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -89,13 +97,24 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Switch
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Home
+import top.yukonga.miuix.kmp.icon.extended.Notes
+import top.yukonga.miuix.kmp.icon.extended.Settings as SettingsIcon
+import androidx.compose.runtime.CompositionLocalProvider
+import com.luminaauth.ui.SettingsPageGlass
+import com.luminaauth.ui.glass.BarBackdropContent
+import com.luminaauth.ui.glass.BarBlurHost
+import androidx.compose.ui.res.painterResource
+import com.luminaauth.ui.glass.LocalRootBottomBarPadding
+import com.luminaauth.ui.glass.PreferenceSwitch
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
-import top.yukonga.miuix.kmp.shader.isRenderEffectSupported
+import top.yukonga.miuix.kmp.material.isRenderEffectSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import com.luminaauth.theme.LuminaAuthTheme
@@ -131,8 +150,13 @@ class MainActivity : ComponentActivity() {
             }, 1200)
         }
         setContent {
-            LuminaAuthTheme {
-                SchoolAutologinApp()
+            val crashText = androidx.compose.runtime.remember { CrashLog.consume(this@MainActivity) }
+            if (crashText != null) {
+                CrashScreen(crashText)
+            } else {
+                LuminaAuthTheme {
+                    SchoolAutologinApp()
+                }
             }
         }
         applyHighRefreshRate()
@@ -227,21 +251,26 @@ fun SchoolAutologinApp() {
     val pagerState = rememberPagerState { 3 }
     val mainPagerState = rememberMainPagerState(pagerState)
     val surfaceColor = MiuixTheme.colorScheme.surface
-    // Dock 图标/文字颜色：取自统一调色板「玻璃上图标/文字」，深色玻璃为白、浅色玻璃为深灰，
-    // 避免任何组合下出现深色图标不可见
-    val appColors = LocalAppColors.current
-    val dockIconColor = appColors.contentOnGlass
     // 关键：仅在设备支持 RenderEffect（Android 12+ 且 GPU 支持 RuntimeShader）时才启用 blur，
     // 不支持的设备走纯色降级，避免渲染崩溃（SukiSU 同款防护）
     val blurSupported = remember { isRenderEffectSupported() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S }
-    val backdrop = rememberLayerBackdrop {
-        drawRect(surfaceColor)
-        drawContent()
-    }
-
     // 手动滑动时同步 Dock 高亮
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { mainPagerState.syncPage() }
+    }
+
+    // Dock 隐藏/显示：直接照抄 HyperIsland AppShell 的 bottomBarProgress + graphicsLayer 方案
+    val dockProgress = remember { Animatable(0f) }
+    var dockComposed by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { com.luminaauth.ui.glass.DockVisibility.hidden }.collect { hiding ->
+            if (!hiding) dockComposed = true
+            dockProgress.animateTo(
+                if (hiding) 1f else 0f,
+                tween(if (hiding) 240 else 320, easing = FastOutSlowInEasing),
+            )
+            if (hiding) dockComposed = false
+        }
     }
 
     // ---- 应用状态 ----
@@ -275,13 +304,15 @@ fun SchoolAutologinApp() {
         })
     }
 
+    BarBlurHost(enabled = blurSupported && isRuntimeShaderSupported(), liquidGlassEnabled = true) {
+    CompositionLocalProvider(LocalRootBottomBarPadding provides 86.dp) {
     Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)) {
+        // 只把页面内容登记进 backdrop，Dock 不参与，避免采到自己
+        BarBackdropContent(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = !isControlDragging,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(if (blurSupported) Modifier.layerBackdrop(backdrop) else Modifier)
+            modifier = Modifier.fillMaxSize()
         ) { page ->
             when (page) {
                 0 -> LoginPage(
@@ -365,7 +396,7 @@ fun SchoolAutologinApp() {
                     onControlDrag = { isControlDragging = it }
                 )
                 1 -> LogPage(logVersion)
-                2 -> SettingsPage(
+                2 -> SettingsPageGlass(
                     autoAuth = autoAuth,
                     pollSec = pollSec,
                     onPollChange = { sec ->
@@ -378,52 +409,49 @@ fun SchoolAutologinApp() {
                         PrefUtils.setAutoAuthEnabled(context, on)
                         toggleService(context, on)
                     },
-                    onControlDrag = { isControlDragging = it },
-                    // 顶部渐进模糊依赖 RuntimeShader（API33+），与 HyperIsland 同一 gate；
-                    // Android 12 等不支持的设备走纯色栏，避免着色器崩溃
-                    blurEnabled = blurSupported && isRuntimeShaderSupported(),
                 )
             }
         }
+        }
 
-        // 底部液态玻璃 Dock（SukiSU 同款）
-        FloatingBottomBar(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(
-                    bottom = 8.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        // 底部 Dock：抄 HyperIsland 的 LiquidGlassNavigationBar（液态玻璃）
+        // 隐藏方式同 HI AppShell：Animatable 进度驱动 translationY + alpha，docked 时整体下沉淡出
+        if (dockComposed) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .graphicsLayer {
+                        translationY = size.height * dockProgress.value
+                        alpha = 1f - dockProgress.value
+                    }
+            ) {
+        com.luminaauth.ui.glass.LiquidGlassNavigationBar(
+            selectedIndex = mainPagerState.selectedPage,
+            onTabSelected = { mainPagerState.animateToPage(it) },
+            items = listOf(
+                top.yukonga.miuix.kmp.basic.NavigationItem(
+                    icon = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(R.drawable.ic_cottage),
+                    label = "主页",
                 ),
-            selectedIndex = { mainPagerState.selectedPage },
-            onSelected = { mainPagerState.animateToPage(it) },
-            backdrop = backdrop,
-            tabsCount = 3,
-            isBlurEnabled = blurSupported,
-        ) {
-            val tabs = listOf(
-                Triple("主页", R.drawable.ic_cottage, 0),
-                Triple("日志", R.drawable.ic_article, 1),
-                Triple("设置", R.drawable.ic_settings, 2),
-            )
-            tabs.forEach { (label, icon, index) ->
-                FloatingBottomBarItem(
-                    onClick = {
-                        mainPagerState.animateToPage(index)
-                    },
-                    modifier = Modifier
-                ) {
-                    Icon(painter = painterResource(id = icon), contentDescription = label, modifier = Modifier.size(22.dp), tint = dockIconColor)
-                    Text(
-                        text = label,
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Visible,
-                        color = dockIconColor
-                    )
-                }
+                top.yukonga.miuix.kmp.basic.NavigationItem(
+                    icon = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(R.drawable.ic_article),
+                    label = "日志",
+                ),
+                top.yukonga.miuix.kmp.basic.NavigationItem(
+                    icon = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(R.drawable.ic_settings),
+                    label = "设置",
+                ),
+            ),
+            backdrop = com.luminaauth.ui.glass.uiGlassBackdrop(),
+            blurRadius = 24.dp,
+            tintStrength = 1f,
+            enabled = true,
+            modifier = Modifier,
+        )
             }
         }
+    }
+    }
     }
 }
 
@@ -457,134 +485,84 @@ private fun LoginPage(
     onLogin: () -> Unit,
     onControlDrag: (Boolean) -> Unit,
 ) {
-    val accent = MiuixTheme.colorScheme.primary
-    val onSurface = MiuixTheme.colorScheme.onSurface
     val secondary = MiuixTheme.colorScheme.onSurfaceContainerVariant
-    val cardBg = MiuixTheme.colorScheme.surfaceContainer
-    val surfaceColor = MiuixTheme.colorScheme.surface
-    val canvasBackdrop = rememberCanvasBackdrop { drawRect(surfaceColor) }
-    val pageScroll = rememberScrollState()
-    Column(
-        Modifier
-            .fillMaxSize()
-            // 滑到顶 / 滑到底的触感（与滑块撞到头同款）
-            .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-            .verticalScroll(pageScroll)
-            .padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(Modifier.height(40.dp))
-        Text(
-            "校园网自动登录",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = onSurface
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "连接校园网后自动完成认证",
-            fontSize = 13.sp,
-            color = secondary
-        )
-        Spacer(Modifier.height(24.dp))
-        // 用户名（miuix 下划线输入框）
-        TextField(
-            value = username,
-            onValueChange = onUsernameChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = "用户名",
-        )
-        Spacer(Modifier.height(8.dp))
-        // 密码
-        TextField(
-            value = password,
-            onValueChange = onPasswordChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = "密码",
-        )
-        Spacer(Modifier.height(16.dp))
-        // 记住密码（miuix 卡片）
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(56.dp),
-                verticalAlignment = Alignment.CenterVertically
+    com.luminaauth.ui.glass.CollapsingPage(title = "自动认证") {
+        item {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("记住密码", fontSize = 15.sp, color = onSurface, modifier = Modifier.weight(1f))
-                LiquidToggle(
-                    selected = { rememberPwd },
-                    onSelect = onRememberChange,
-                    backdrop = canvasBackdrop,
-                    onDragStateChange = onControlDrag,
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = username,
+                    onValueChange = onUsernameChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "用户名",
                 )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        // 自动认证（miuix 卡片）
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .height(64.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("自动认证", fontSize = 15.sp, color = onSurface)
-                    Text("连接校园网 WiFi 自动登录", fontSize = 12.sp, color = secondary)
+                Spacer(Modifier.height(8.dp))
+                TextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = "密码",
+                )
+                Spacer(Modifier.height(16.dp))
+                Card(Modifier.fillMaxWidth()) {
+                    PreferenceSwitch(
+                        title = "记住密码",
+                        summary = null,
+                        icon = null,
+                        checked = rememberPwd,
+                        onCheckedChange = onRememberChange,
+                    )
+                    PreferenceSwitch(
+                        title = "自动认证",
+                        summary = "连接校园网 WiFi 自动登录",
+                        icon = null,
+                        checked = autoAuth,
+                        onCheckedChange = onAutoAuthChange,
+                    )
                 }
-                LiquidToggle(
-                    selected = { autoAuth },
-                    onSelect = onAutoAuthChange,
-                    backdrop = canvasBackdrop,
-                    onDragStateChange = onControlDrag,
+                Spacer(Modifier.height(24.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MiuixTheme.colorScheme.primary)
+                        .clickable(onClick = onLogin),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("登录", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    statusText,
+                    fontSize = 14.sp,
+                    color = secondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(Modifier.height(140.dp))
             }
         }
-        Spacer(Modifier.height(24.dp))
-        // 登录按钮
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(MiuixTheme.colorScheme.primary)
-                .clickable(onClick = onLogin),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("登录", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            statusText,
-            fontSize = 14.sp,
-            color = secondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(60.dp))
     }
 }
-
-
 
 @Composable
 private fun LogPage(logVersion: Int) {
     val context = LocalContext.current
     val onSurface = MiuixTheme.colorScheme.onSurface
     val boxBg = MiuixTheme.colorScheme.surfaceContainer
-    // 运行日志（合并了原运行日志 + 全局详细日志）
     val logText = remember(logVersion) {
         val main = LogBuffer.getAllText()
         val detail = LogBuffer.getDetailAllText()
         if (detail.isBlank()) main else (main + "\n" + detail)
     }
-    val scrollState = rememberScrollState()
     var autoScroll by remember { mutableStateOf(true) }
+    val innerScroll = rememberScrollState()
     LaunchedEffect(logVersion, autoScroll) {
-        if (autoScroll) scrollState.scrollTo(scrollState.maxValue)
+        if (autoScroll) innerScroll.scrollTo(innerScroll.maxValue)
     }
 
     fun stamp(): String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -598,62 +576,47 @@ private fun LogPage(logVersion: Int) {
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri -> if (uri != null) writeTo(uri, logText) }
 
-    val logPageScroll = rememberScrollState()
-    Column(
-        Modifier
-            .fillMaxSize()
-            // 滑到顶 / 滑到底的触感（与滑块撞到头同款）
-            .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-            .verticalScroll(logPageScroll)
-            .statusBarsPadding()
-            .padding(
-                start = 20.dp,
-                end = 20.dp,
-                top = 8.dp,
-                bottom = 100.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            )
-    ) {
-        Spacer(Modifier.height(8.dp))
-        // ============ 运行日志 ============
-        Text("运行日志", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = onSurface)
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActionChip(if (autoScroll) "暂停滚动" else "自动滚动", Modifier.weight(1f)) {
-                autoScroll = !autoScroll
-            }
-            ActionChip("导出", Modifier.weight(1f)) {
-                exportLauncher.launch("lumina_run_${stamp()}.log")
-            }
-            ActionChip("清空", Modifier.weight(1f)) {
-                LogBuffer.clear()
-                LogBuffer.clearDetail()
+    com.luminaauth.ui.glass.CollapsingPage(title = "日志") {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ActionChip(if (autoScroll) "暂停滚动" else "自动滚动", Modifier.weight(1f)) {
+                    autoScroll = !autoScroll
+                }
+                ActionChip("导出", Modifier.weight(1f)) {
+                    exportLauncher.launch("lumina_run_${stamp()}.log")
+                }
+                ActionChip("清空", Modifier.weight(1f)) {
+                    LogBuffer.clear()
+                    LogBuffer.clearDetail()
+                }
             }
         }
-        Spacer(Modifier.height(10.dp))
-        // 预览框：约 30 行
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(540.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(boxBg)
-                .padding(12.dp)
-        ) {
-            Column(
+        item {
+            // 固定预览框，内部独立滚动
+            Box(
                 Modifier
-                    .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-                    .verticalScroll(scrollState)
+                    .fillMaxWidth()
+                    .height(540.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(boxBg)
+                    .padding(12.dp)
             ) {
-                Text(
-                    logText,
-                    fontSize = 12.sp,
-                    lineHeight = 18.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = onSurface
-                )
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(innerScroll)
+                ) {
+                    Text(
+                        logText,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = onSurface
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        item { Spacer(Modifier.height(120.dp)) }
     }
 }
 
@@ -1271,4 +1234,33 @@ private fun isAutoStartGranted(context: Context): Boolean {
         }
     } catch (e: Exception) {}
     return false
+}
+
+
+@androidx.compose.runtime.Composable
+private fun CrashScreen(text: String) {
+    androidx.compose.material3.Surface(
+        color = androidx.compose.ui.graphics.Color(0xFF101010),
+        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxSize()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                .padding(16.dp),
+        ) {
+            androidx.compose.material3.Text(
+                text = "上次崩溃日志（截图发我）",
+                color = androidx.compose.ui.graphics.Color(0xFFFF6B6B),
+                fontSize = 16.sp,
+            )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.Text(
+                text = text,
+                color = androidx.compose.ui.graphics.Color(0xFFEDEDED),
+                fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
+        }
+    }
 }

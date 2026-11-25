@@ -16,7 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.luminaauth.abouteffect.isInDarkTheme
 import com.luminaauth.abouteffect.shouldShowSplitPane
-import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.floor
 import kotlin.time.Duration.Companion.milliseconds

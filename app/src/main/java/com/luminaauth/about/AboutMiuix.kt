@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.WindowInsets
@@ -83,6 +86,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.flow.onEach
 import com.luminaauth.abouteffect.BgEffectBackground
 import com.luminaauth.abouteffect.ColorBlendToken
@@ -102,18 +106,19 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurBlendMode
 import top.yukonga.miuix.kmp.blur.BlurColors
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import com.luminaauth.ui.glass.GlassAlertDialog
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
@@ -141,8 +146,9 @@ fun AboutScreenMiuix(
     }
 
     val enableBlur = LocalEnableBlur.current
-    val barBlurBackdrop = rememberBlurBackdrop(enableBlur)
-    val blurActive = barBlurBackdrop != null && scrollProgress == 1f
+    // 直接用全局 glass backdrop，圆钮和顶栏共用同一张模糊图
+    val barBlurBackdrop = com.luminaauth.ui.glass.LocalBarBlurBackdrop.current
+    val blurActive = barBlurBackdrop != null
     val barColor = if (blurActive) {
         Color.Transparent
     } else {
@@ -176,33 +182,7 @@ fun AboutScreenMiuix(
 
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
-        topBar = {
-            BlurredBar(backdrop = barBlurBackdrop, blurActive = blurActive) {
-                SmallTopAppBar(
-                    title = state.title,
-                    scrollBehavior = topAppBarScrollBehavior,
-                    color = barColor,
-                    titleColor = colorScheme.onSurface.copy(
-                        alpha = ((scrollProgress - 0.35f) / 0.65f).coerceIn(0f, 1f),
-                    ),
-                    navigationIcon = {
-                        IconButton(
-                            onClick = actions.onBack
-                        ) {
-                            val layoutDirection = LocalLayoutDirection.current
-                            Icon(
-                                modifier = Modifier.graphicsLayer {
-                                    if (layoutDirection == LayoutDirection.Rtl) scaleX = -1f
-                                },
-                                imageVector = MiuixIcons.Back,
-                                contentDescription = null,
-                                tint = colorScheme.onBackground
-                            )
-                        }
-                    },
-                )
-            }
-        },
+        topBar = {},
         popupHost = { top.yukonga.miuix.kmp.utils.MiuixPopupUtils.MiuixPopupHost() },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
     ) { innerPadding ->
@@ -222,6 +202,34 @@ fun AboutScreenMiuix(
             )
         }
 
+        // —— 官方玻璃顶栏：标题常显（expandable=false 时小标题不折叠）；到顶无模糊、返回钮透明只剩箭头 ——
+        val isScrolled by androidx.compose.runtime.remember {
+            androidx.compose.runtime.derivedStateOf {
+                lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 0
+            }
+        }
+        val titleAlpha by androidx.compose.animation.core.animateFloatAsState(
+            targetValue = if (isScrolled) 1f else 0f,
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = 220),
+            label = "aboutTitleAlpha",
+        )
+        top.yukonga.miuix.kmp.glass.GlassTopAppBar(
+            title = state.title,
+            titleAlpha = { titleAlpha },
+            expandable = false,
+            isContentScrolled = isScrolled,
+            progressiveBlur = isScrolled,
+            backdrop = if (isScrolled) com.luminaauth.ui.glass.uiGlassBackdrop() else null,
+            bandBrush = androidx.compose.ui.graphics.SolidColor(Color.Transparent),
+            bandOverhang = 0.dp,
+            navigationIcon = {
+                // 始终是玻璃圆钮，到顶时不再退化成透明箭头
+                top.yukonga.miuix.kmp.glass.GlassIconButton(onClick = actions.onBack) {
+                    Icon(MiuixIcons.Back, "返回")
+                }
+            },
+        )
+
         // 更新对话框（必须在 Scaffold content lambda 内部，和高级设置页一样）
         val rel = (updateState as? UpdateUi.Available)?.rel
         LaunchedEffect(showUpdateDialog) {
@@ -230,7 +238,7 @@ fun AboutScreenMiuix(
                 dialogPhase = DialogPhase.Notes
             }
         }
-        OverlayDialog(
+        GlassAlertDialog(
             show = showUpdateDialog && rel != null,
             title = if (dialogPhase == DialogPhase.Progress) "更新中…" else "更新说明",
             summary = "",
@@ -425,7 +433,7 @@ private fun AboutContent(
         end = innerPadding.calculateEndPadding(layoutDirection),
     )
     val logoPadding = PaddingValues(
-        top = innerPadding.calculateTopPadding() + 40.dp,
+        top = innerPadding.calculateTopPadding() + 96.dp,
         start = innerPadding.calculateStartPadding(layoutDirection),
         end = innerPadding.calculateEndPadding(layoutDirection),
     )
@@ -546,8 +554,7 @@ private fun AboutContent(
             modifier = Modifier
                 .fillMaxSize()
                 .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-                .overScrollVertical()
-                .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+                .overScrollVertical(),
             contentPadding = PaddingValues(
                 top = scrollPadding.calculateTopPadding(),
                 start = scrollPadding.calculateStartPadding(layoutDirection),

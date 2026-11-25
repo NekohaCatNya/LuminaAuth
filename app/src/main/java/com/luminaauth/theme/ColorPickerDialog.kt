@@ -20,7 +20,7 @@ import top.yukonga.miuix.kmp.basic.ColorPalette
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.window.WindowDialog
+import com.luminaauth.ui.glass.GlassAlertDialog
 
 /**
  * 颜色选择对话框：Miuix 调色板 + 十六进制输入。
@@ -37,7 +37,11 @@ fun AppColorPickerDialog(
     var selectedColor by remember(show, initialColor) { mutableStateOf(initialColor) }
     var colorCode by remember(show, initialColor) { mutableStateOf(initialColor.toHexColor()) }
 
-    WindowDialog(show = show, title = title, onDismissRequest = onDismiss) {
+    GlassAlertDialog(
+        show = show,
+        title = title,
+        onDismissRequest = onDismiss,
+    ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ColorPalette(
                 color = selectedColor,

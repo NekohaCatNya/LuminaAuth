@@ -7,7 +7,6 @@ import java.io.File
 
 /**
  * Discovers and manages plugins:
- *  - built-in plugins shipped under assets (*.plugin.yaml)
  *  - external plugins imported into app-specific external storage
  *    (getExternalFilesDir, no storage permission required)
  * Also persists the active plugin id.
@@ -20,12 +19,7 @@ object PluginManager {
 
     fun list(context: Context): List<Plugin> {
         val result = ArrayList<Plugin>()
-        assetPlugins(context).forEach {
-            if (result.none { x -> x.id == it.id }) result.add(it)
-        }
-
-        // External scanning is fully isolated so a failure can never discard
-        // the built-in plugins already collected above.
+        // 插件不再随 APK 内置：只扫描用户导入的外部插件目录。
         try {
             val dir = externalDir(context)
             dir.listFiles()?.filter { it.isFile && isPluginFileName(it.name) }?.sortedBy { it.name }
@@ -64,7 +58,6 @@ object PluginManager {
                 val id = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .getString(KEY_ACTIVE, null)
                 all.firstOrNull { it.id == id }
-                    ?: all.firstOrNull { it.source == PluginSource.BUILTIN }
                     ?: all.first()
             }
         } catch (t: Throwable) {
@@ -141,39 +134,6 @@ object PluginManager {
     }
 
     // ---------------- internals ----------------
-
-    private const val FALLBACK_BUILTIN = "default_drcom.plugin.yaml"
-
-    private fun assetPlugins(context: Context): List<Plugin> {
-        val names = try {
-            context.assets.list("")?.filter { isPluginFileName(it) }?.toMutableList()
-                ?: mutableListOf()
-        } catch (e: Exception) {
-            mutableListOf()
-        }
-        // Defensive: if root-asset enumeration omits the known built-in, try to
-        // open it directly by name.
-        if (names.none { it.equals(FALLBACK_BUILTIN, ignoreCase = true) } &&
-            assetExists(context, FALLBACK_BUILTIN)) {
-            names.add(FALLBACK_BUILTIN)
-        }
-        com.luminaauth.LogBuffer.addDetail("PLUGIN", "builtin count=${names.size}")
-        return names.mapNotNull { name ->
-            try {
-                val text = context.assets.open(name).use { it.readBytes().toString(Charsets.UTF_8) }
-                PluginLoader.load(text, name, PluginSource.BUILTIN)
-            } catch (e: Exception) {
-                com.luminaauth.LogBuffer.addDetail("PLUGIN", "asset_fail file=$name err=${e.message}")
-                null
-            }
-        }
-    }
-
-    private fun assetExists(context: Context, name: String): Boolean = try {
-        context.assets.open(name).use { true }
-    } catch (e: Exception) {
-        false
-    }
 
     private fun externalDir(context: Context): File {
         val dir = context.getExternalFilesDir(PLUGIN_DIR)

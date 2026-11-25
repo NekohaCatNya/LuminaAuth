@@ -38,6 +38,10 @@ object NetworkChannel {
     @Volatile
     private var currentChannel: Int = -1
 
+    /** 插件声明的优先网卡名，空表示按传输类型挑第一个可用。 */
+    @Volatile
+    var preferredIfaces: List<String> = emptyList()
+
     /** 常驻监听：网络晚于进程出现（冷启动时 WiFi 还没连上）时自动补绑。 */
     private val watchers = HashMap<Int, ConnectivityManager.NetworkCallback>()
 
@@ -95,6 +99,7 @@ object NetworkChannel {
             if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue
             val iface = try { cm.getLinkProperties(n)?.interfaceName } catch (_: Throwable) { null }
             if (iface.isNullOrEmpty()) continue
+            if (preferredIfaces.isNotEmpty() && preferredIfaces.none { iface.startsWith(it) }) continue
             return n
         }
         return null
@@ -130,18 +135,66 @@ object NetworkChannel {
         }
     }
 
+    private var lastPromoteAt = 0L
+    private const val PROMOTE_COOLDOWN_MS = 3000L
+
     /**
-     * 增强模式专用：认证成功后催促系统重新评估网络，让默认网络尽快切到所选通道。
-     * 只用 root 重新拉起该通道的连接，不改其它通道的开关状态。
-     * 返回实际执行的命令，未执行返回 null。
+     * 克制版“催系统评估”：认证成功后最多 3 秒触发一次，不循环轰炸。
+     * 只在当前默认网络不是所选通道时才动作；增强模式 + root 时额外做一次全局默认网络切换。
+     * 返回用于日志的结果串。
      */
-    fun nudgeDefaultNetwork(channel: Int): String? {
-        val cmd = when (channel) {
-            WIFI -> "cmd wifi reconnect"
-            CELLULAR -> "svc data disable; sleep 1; svc data enable"
-            else -> null
-        } ?: return null
-        val out = RootUtils.exec(cmd) ?: return null
-        return cmd + (if (out.isEmpty()) "" else " => " + out.lineSequence().first())
+    @Synchronized
+    fun promoteOnce(channel: Int, allowPromote: Boolean = true, allowRoot: Boolean = true): String {
+        val cm = connectivityManager ?: return "skip:no-cm"
+        if (!allowPromote) return "skip:disabled"
+        val now = System.currentTimeMillis()
+        if (now - lastPromoteAt < PROMOTE_COOLDOWN_MS) return "skip:cooldown"
+        lastPromoteAt = now
+
+        val transport = transportOf(channel)
+        val target = pick(cm, transport) ?: boundNetwork ?: return "skip:no-network"
+        val current = try { cm.activeNetwork } catch (_: Throwable) { null }
+        if (current != null && current == target) return "already:default"
+
+        val rootPath = allowRoot && PrefUtils.isEnhancedModeEnabled(AppContext.get()) && RootUtils.isRootAvailable()
+        if (rootPath) {
+            val netId = netIdOf(target)
+            if (netId > 0) {
+                val out = RootUtils.exec("ndc network default set " + netId)
+                if (out != null) {
+                    LogBuffer.add("NET", "promote root netId=" + netId + " out=" + out.lineSequence().first())
+                    if (out.isEmpty() || out.contains("200")) return "root:set:" + netId
+                }
+            }
+        }
+
+        return try {
+            cm.reportNetworkConnectivity(target, true)
+            "requested"
+        } catch (e: Throwable) {
+            "denied:" + e.javaClass.simpleName
+        }
+    }
+
+    /** 把本进程流量绑定到指定网络；失败返回 false，不影响后续逻辑。 */
+    fun bindProcessTo(network: Network?): Boolean {
+        val cm = connectivityManager ?: return false
+        if (network == null) return false
+        return try {
+            cm.bindProcessToNetwork(network)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /** 通过反射拿 netId（隐藏字段，拿不到返回 -1，直接跳过 root 路径）。 */
+    private fun netIdOf(n: Network): Int {
+        return try {
+            val f = Network::class.java.getDeclaredField("netId")
+            f.isAccessible = true
+            f.getInt(n)
+        } catch (_: Throwable) {
+            -1
+        }
     }
 }

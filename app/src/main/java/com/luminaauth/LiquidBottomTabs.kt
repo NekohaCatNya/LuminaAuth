@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -75,11 +76,13 @@ fun LiquidBottomTabs(
 ) {
     // 跟随应用主题（跟随系统/浅色/深色）：
     // 跟随系统时用系统深浅兜底，浅色/深色时用应用内设置
-    val context = LocalContext.current
-    val isLightTheme = (ThemeUtils.getIsDark(context) ?: isSystemInDarkTheme()) != true
+    // 深浅色直接取 miuix 当前 surface（跟随系统/浅色/深色都会同步），不再看系统兜底
+    val isDark = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.surface
+        .luminance() < 0.5f
     val appColors = LocalAppColors.current
     val accentColor = appColors.controlAccent
-    val containerColor = appColors.glassContainer.copy(0.4f)
+    val containerColor = if (isDark) Color(0xFF141414).copy(alpha = 0.62f)
+    else Color(0xFFF7F7F7).copy(alpha = 0.55f)
 
     val tabsBackdrop = rememberLayerBackdrop()
 
@@ -179,6 +182,9 @@ fun LiquidBottomTabs(
                         vibrancy()
                         blur(8f.dp.toPx())
                         lens(24f.dp.toPx(), 24f.dp.toPx())
+                    },
+                    highlight = {
+                        Highlight.Default.copy(alpha = if (isDark) 0.10f else 0.42f)
                     },
                     layerBlock = {
                         val progress = dampedDragAnimation.pressProgress
@@ -281,7 +287,7 @@ fun LiquidBottomTabs(
                     onDrawSurface = {
                         val progress = dampedDragAnimation.pressProgress
                         drawRect(
-                            if (isLightTheme) Color.Black.copy(0.1f)
+                            if (!isDark) Color.Black.copy(0.1f)
                             else Color.White.copy(0.1f),
                             alpha = 1f - progress
                         )

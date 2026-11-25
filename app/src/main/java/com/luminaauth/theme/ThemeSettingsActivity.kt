@@ -59,7 +59,11 @@ class ThemeSettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             LuminaAuthTheme {
-                ThemeSettingsScreen(onBack = { finish() })
+                com.luminaauth.ui.glass.BarBlurHost(
+                    enabled = top.yukonga.miuix.kmp.material.isRuntimeShaderSupported(),
+                ) {
+                    ThemeSettingsScreen(onBack = { finish() })
+                }
             }
         }
     }
@@ -80,133 +84,26 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
     var editTarget by remember { mutableStateOf<EditTarget?>(null) }
 
     var themeMode by remember { mutableIntStateOf(PrefUtils.getThemeMode(context)) }
-    val activity = context as? Activity
+    var monetEnabled by remember { mutableStateOf(PrefUtils.isMonetEnabled(context)) }
+    // 与 HyperIsland 一致：只改偏好，靠 MiuixTheme 的 controller 当场换色，不重建 Activity
+    val themeHandler = remember { Handler(Looper.getMainLooper()) }
     fun applyMode(index: Int) {
         themeMode = index
-        PrefUtils.setThemeMode(context, index)
-        // 与原设置页一致：延迟重建，让分段控件动画先收尾
-        Handler(Looper.getMainLooper()).postDelayed({ activity?.recreate() }, 300)
+        // 指示器先动，延迟 0.8 秒再真正换肤，避免同帧重建导致卡顿
+        themeHandler.removeCallbacksAndMessages(null)
+        themeHandler.postDelayed({
+            com.luminaauth.theme.AppThemeState.setMode(context, index)
+        }, 800L)
     }
 
-    val canvasBackdrop = rememberCanvasBackdrop { drawRect(surfaceColor) }
-
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(
-                title = "主题与配色",
-                color = surfaceColor,
-                titleColor = onSurface,
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(MiuixIcons.Back, contentDescription = "返回", tint = onSurface)
-                    }
-                },
-            )
-        },
-        popupHost = { },
-        containerColor = MiuixTheme.colorScheme.background,
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                // 滑到顶 / 滑到底的触感（与滑块撞到头同款）
-                .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-                .padding(innerPadding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // —— 主题模式 ——
-            item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("主题模式", fontSize = 15.sp, color = onSurface)
-                        Spacer(Modifier.height(4.dp))
-                        Text("跟随系统 / 浅色 / 深色，全界面自动适配", fontSize = 12.sp, color = secondary)
-                        Spacer(Modifier.height(12.dp))
-                        LiquidBottomTabs(
-                            selectedTabIndex = { themeMode },
-                            onTabSelected = ::applyMode,
-                            backdrop = canvasBackdrop,
-                            tabsCount = 3,
-                            onDragStateChange = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                        ) {
-                            LiquidBottomTab(onClick = { applyMode(0) }) {
-                                Text("跟随系统", fontSize = 13.sp, color = onSurface)
-                            }
-                            LiquidBottomTab(onClick = { applyMode(1) }) {
-                                Text("浅色", fontSize = 13.sp, color = onSurface)
-                            }
-                            LiquidBottomTab(onClick = { applyMode(2) }) {
-                                Text("深色", fontSize = 13.sp, color = onSurface)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // —— 每一类元素一组独立调色板 ——
-            PaletteCategory.entries.forEach { category ->
-                item(key = "header_${category.name}") {
-                    Column(Modifier.padding(start = 4.dp, top = 4.dp)) {
-                        Text(category.title, fontSize = 14.sp, color = onSurface)
-                        Text(category.subtitle, fontSize = 12.sp, color = secondary)
-                    }
-                }
-                item(key = "card_${category.name}") {
-                    val roles = PaletteRoles.byCategory(category)
-                    Card(Modifier.fillMaxWidth()) {
-                        Column {
-                            roles.forEachIndexed { index, role ->
-                                ColorRoleRow(
-                                    role = role,
-                                    refresh = refresh,
-                                    onPick = { dark -> editTarget = EditTarget(role, dark) },
-                                )
-                                if (index != roles.lastIndex) {
-                                    Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp)
-                                            .height(1.dp)
-                                            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                                    )
-                                }
-                            }
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        resetCategory(context, category)
-                                        refresh++
-                                    }
-                                    .padding(vertical = 13.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text("恢复本类默认", fontSize = 13.sp, color = secondary)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // —— 全部重置 ——
-            item(key = "reset_all") {
-                Button(
-                    onClick = {
-                        PrefUtils.resetAllPaletteColors(context)
-                        refresh++
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    top.yukonga.miuix.kmp.basic.Text("全部恢复默认配色")
-                }
-            }
-        }
+    val canvasBackdrop = androidx.compose.runtime.key(surfaceColor) {
+        rememberCanvasBackdrop { drawRect(surfaceColor) }
     }
 
+    com.luminaauth.ui.glass.DetailPage(
+        title = "主题与配色",
+        onBack = onBack,
+        overlay = {
     // 取色对话框
     editTarget?.let { target ->
         val title = if (target.role.mode == ColorVariantMode.LIGHT_DARK) {
@@ -227,6 +124,68 @@ private fun ThemeSettingsScreen(onBack: () -> Unit) {
             },
         )
     }
+        },
+    ) {
+            // —— 主题模式（保持原有浅色/深色分段控件）——
+            item {
+                com.luminaauth.ui.glass.SectionTitle("主题模式")
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("主题模式", fontSize = 15.sp, color = onSurface)
+                        Spacer(Modifier.height(4.dp))
+                        Text("跟随系统 / 浅色 / 深色，全界面自动适配", fontSize = 12.sp, color = secondary)
+                        Spacer(Modifier.height(12.dp))
+                        androidx.compose.runtime.key(surfaceColor) {
+                            com.luminaauth.ui.components.SegmentedDock(
+                                options = listOf("跟随系统", "浅色", "深色"),
+                                selectedIndex = themeMode.coerceIn(0, 2),
+                                onSelect = ::applyMode,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            // —— Monet 取色开关 ——
+            item(key = "monet") {
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Monet 取色", fontSize = 15.sp, color = onSurface)
+                            Spacer(Modifier.height(2.dp))
+                            Text("根据壁纸自动生成主题色", fontSize = 12.sp, color = secondary)
+                        }
+                        top.yukonga.miuix.kmp.basic.Switch(
+                            checked = monetEnabled,
+                            onCheckedChange = { enabled ->
+                                monetEnabled = enabled
+                                com.luminaauth.theme.AppThemeState.setMonet(context, enabled)
+                            },
+                        )
+                    }
+                }
+            }
+
+            // —— 主题强调色（唯一可调颜色）——
+            item(key = "accent") {
+                Card(Modifier.fillMaxWidth()) {
+                    ColorRoleRow(
+                        role = PaletteRoles.ACCENT,
+                        refresh = refresh,
+                        onPick = { dark -> editTarget = EditTarget(PaletteRoles.ACCENT, dark) },
+                    )
+                }
+            }
+    }
+
+
 }
 
 @Composable

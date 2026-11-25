@@ -64,7 +64,7 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import com.luminaauth.ui.glass.GlassAlertDialog
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.Close
@@ -81,9 +81,13 @@ class AdvancedSettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             LuminaAuthTheme {
-                AdvancedSettingsScreen(
-                    onBack = { finish() }
-                )
+                com.luminaauth.ui.glass.BarBlurHost(
+                    enabled = top.yukonga.miuix.kmp.material.isRuntimeShaderSupported(),
+                ) {
+                    AdvancedSettingsScreen(
+                        onBack = { finish() }
+                    )
+                }
             }
         }
     }
@@ -130,32 +134,78 @@ private fun AdvancedSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            SmallTopAppBar(
-                title = "高级设置",
-                color = colorScheme.surface,
-                titleColor = colorScheme.onSurface,
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(MiuixIcons.Back, contentDescription = "返回", tint = colorScheme.onSurface)
-                    }
-                },
+    com.luminaauth.ui.glass.DetailPage(
+        title = "高级设置",
+        onBack = onBack,
+        overlay = {
+    // 恢复 SSID 确认对话框（Miuix 原生 OverlayDialog）
+    GlassAlertDialog(
+        show = showResetSsidDialog,
+        title = "确认恢复",
+        summary = "确定要恢复默认 SSID 列表吗？当前自定义的 SSID 将被清除。",
+        onDismissRequest = { showResetSsidDialog = false },
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(
+                text = "取消",
+                onClick = { showResetSsidDialog = false },
+                modifier = Modifier.weight(1f)
             )
+            TextButton(
+                text = "确定",
+                               onClick = {
+                    PrefUtils.resetSsidList(AppContext.get())
+                    refreshList()
+                    AuthGlobalState.setStatus(AuthStatus.NEED_AUTH)
+                    showResetSsidDialog = false
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+
+    // 恢复登录地址确认对话框（Miuix 原生 OverlayDialog）
+    GlassAlertDialog(
+        show = showResetUrlDialog,
+        title = "确认恢复",
+        summary = "确定要恢复默认登录地址吗？当前自定义的地址将被清除。",
+        onDismissRequest = { showResetUrlDialog = false },
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TextButton(
+                text = "取消",
+                onClick = { showResetUrlDialog = false },
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                text = "确定",
+                onClick = {
+                    PrefUtils.resetLoginUrl(AppContext.get())
+                    customAuthUrl = ""
+                    showResetUrlDialog = false
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+
+    // 插件导入失败详情对话框（Miuix 原生 OverlayDialog）
+    GlassAlertDialog(
+        show = pluginImportError != null,
+        title = "插件导入失败",
+        summary = pluginImportError ?: "",
+        onDismissRequest = { pluginImportError = null },
+    ) {
+        TextButton(
+            text = "关闭",
+            onClick = { pluginImportError = null },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
         },
-        popupHost = { MiuixPopupUtils.MiuixPopupHost() },
-        containerColor = colorScheme.background,
-    ) { innerPadding ->
-        LazyColumn(
-            state = lazyListState,
-            modifier = Modifier
-                .fillMaxSize()
-                // 滑到顶 / 滑到底的触感（与滑块撞到头同款）
-                .scrollEndHaptic(HapticFeedbackType.GestureThresholdActivate)
-                .padding(innerPadding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-        ) {
+    ) {
             item {
+                com.luminaauth.ui.glass.SectionTitle("WiFi")
                 // 标题卡片
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -357,76 +407,13 @@ private fun AdvancedSettingsScreen(onBack: () -> Unit) {
             }
 
             item {
+                com.luminaauth.ui.glass.SectionTitle("插件")
                 PluginManagerCard(onError = { pluginImportError = it })
                 Spacer(Modifier.height(40.dp))
             }
-        }
-
-    // 恢复 SSID 确认对话框（Miuix 原生 OverlayDialog）
-    OverlayDialog(
-        show = showResetSsidDialog,
-        title = "确认恢复",
-        summary = "确定要恢复默认 SSID 列表吗？当前自定义的 SSID 将被清除。",
-        onDismissRequest = { showResetSsidDialog = false },
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(
-                text = "取消",
-                onClick = { showResetSsidDialog = false },
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(
-                text = "确定",
-                               onClick = {
-                    PrefUtils.resetSsidList(AppContext.get())
-                    refreshList()
-                    AuthGlobalState.setStatus(AuthStatus.NEED_AUTH)
-                    showResetSsidDialog = false
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
     }
 
-    // 恢复登录地址确认对话框（Miuix 原生 OverlayDialog）
-    OverlayDialog(
-        show = showResetUrlDialog,
-        title = "确认恢复",
-        summary = "确定要恢复默认登录地址吗？当前自定义的地址将被清除。",
-        onDismissRequest = { showResetUrlDialog = false },
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(
-                text = "取消",
-                onClick = { showResetUrlDialog = false },
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(
-                text = "确定",
-                onClick = {
-                    PrefUtils.resetLoginUrl(AppContext.get())
-                    customAuthUrl = ""
-                    showResetUrlDialog = false
-                },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
 
-    // 插件导入失败详情对话框（Miuix 原生 OverlayDialog）
-    OverlayDialog(
-        show = pluginImportError != null,
-        title = "插件导入失败",
-        summary = pluginImportError ?: "",
-        onDismissRequest = { pluginImportError = null },
-    ) {
-        TextButton(
-            text = "关闭",
-            onClick = { pluginImportError = null },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-    }
 }
 
 /**
@@ -483,6 +470,14 @@ private fun PluginManagerCard(onError: (String) -> Unit) {
             Text("选择或导入 *.plugin.yaml 认证插件", fontSize = 12.sp, color = colorScheme.onSurfaceContainerVariant)
             Spacer(Modifier.height(12.dp))
 
+            if (plugins.isEmpty()) {
+                Text(
+                    "当前没有已安装的插件，请先导入 *.plugin.yaml（插件不再随 APK 内置）",
+                    fontSize = 12.sp,
+                    color = colorScheme.onSurfaceContainerVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
             plugins.forEach { p ->
                 Row(
                     Modifier
