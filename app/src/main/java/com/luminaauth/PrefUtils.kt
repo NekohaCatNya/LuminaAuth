@@ -14,6 +14,11 @@ object PrefUtils {
     private const val KEY_LOGIN_URL = "login_url"
     private const val KEY_REMEMBER_PWD = "remember_pwd"
     private const val KEY_NOTIFY_DETECT = "notify_detect"
+    private const val KEY_DETECT_MODE = "detect_mode"
+
+    /** 检测方式：事件驱动（网络变化时复核 SSID）/ 通知检测 */
+    const val MODE_EVENT = "event"
+    const val MODE_NOTIFY = "notify"
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_AUTH_STATE = "auth_status"
     private const val KEY_AUTH_STATE_TIME = "auth_status_ts"
@@ -58,11 +63,27 @@ object PrefUtils {
     @JvmStatic fun setEnhancedModeEnabled(context: Context, v: Boolean) =
         prefs(context).edit().putBoolean(KEY_ENHANCED_MODE, v).apply()
 
+    @JvmStatic fun getDetectMode(context: Context): String {
+        val saved = prefs(context).getString(KEY_DETECT_MODE, null)
+        if (saved == MODE_EVENT || saved == MODE_NOTIFY) return saved!!
+        // 老版本没有 detect_mode：统一按事件驱动处理
+        return MODE_EVENT
+    }
+
+    @JvmStatic fun setDetectMode(context: Context, mode: String) {
+        val m = if (mode == MODE_NOTIFY) MODE_NOTIFY else MODE_EVENT
+        prefs(context).edit()
+            .putString(KEY_DETECT_MODE, m)
+            // 兼容旧代码/旧版本的布尔开关
+            .putBoolean(KEY_NOTIFY_DETECT, m == MODE_NOTIFY)
+            .apply()
+    }
+
     @JvmStatic fun isNotifyDetectEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_NOTIFY_DETECT, false)
+        getDetectMode(context) == MODE_NOTIFY
 
     @JvmStatic fun setNotifyDetectEnabled(context: Context, v: Boolean) =
-        prefs(context).edit().putBoolean(KEY_NOTIFY_DETECT, v).apply()
+        setDetectMode(context, if (v) MODE_NOTIFY else MODE_EVENT)
 
     @JvmStatic fun isRememberPwdEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_REMEMBER_PWD, false)

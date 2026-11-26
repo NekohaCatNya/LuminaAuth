@@ -103,20 +103,22 @@ JNIEXPORT jstring JNICALL
 Java_com_luminaauth_NativeBridge_nativeHttpRequest(JNIEnv* env, jclass cls,
                                                   jstring method, jstring url,
                                                   jstring body, jstring referer,
-                                                  jint timeoutMs) {
+                                                  jstring headers, jint timeoutMs) {
     const char* cm = env->GetStringUTFChars(method, nullptr);
     const char* cu = env->GetStringUTFChars(url, nullptr);
     const char* cb = (body != nullptr) ? env->GetStringUTFChars(body, nullptr) : "";
     const char* cr = (referer != nullptr) ? env->GetStringUTFChars(referer, nullptr) : "";
+    const char* ch = (headers != nullptr) ? env->GetStringUTFChars(headers, nullptr) : "";
 
     lumina::HttpResult res = lumina::httpRequest(std::string(cm), std::string(cu),
                                                  std::string(cb), std::string(cr),
-                                                 (int)timeoutMs);
+                                                 std::string(ch), (int)timeoutMs);
 
     env->ReleaseStringUTFChars(method, cm);
     env->ReleaseStringUTFChars(url, cu);
     if (body != nullptr) env->ReleaseStringUTFChars(body, cb);
     if (referer != nullptr) env->ReleaseStringUTFChars(referer, cr);
+    if (headers != nullptr) env->ReleaseStringUTFChars(headers, ch);
 
     std::string json = "{\"code\":" + std::to_string(res.code)
                      + ",\"error\":\"" + jsonEscape(res.error) + "\""

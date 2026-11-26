@@ -114,7 +114,8 @@ object RootUtils {
         if (!ssid.isNullOrEmpty()) return ssid
         out = exec("dumpsys wifi")
         if (out != null) {
-            val m = Regex("SSID:\\s*\"?([^\",\\s]+)").find(out)
+            // 只认 mWifiInfo（当前连接），不能抓配置列表里的任意 SSID
+            val m = Regex("mWifiInfo.*?SSID:\\s*\"?([^\",\\s]+)").find(out)
             if (m != null) return m.groupValues[1].trim()
         }
         return null

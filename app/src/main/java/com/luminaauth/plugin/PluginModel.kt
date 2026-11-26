@@ -21,6 +21,8 @@ data class Plugin(
     val loginSteps: List<StepDef>,
     val source: PluginSource,
     val fileName: String,
+    /** 全局默认请求头；具体 check / step 里的同名头优先级更高。 */
+    val headers: Map<String, String> = emptyMap(),
     val timing: TimingDef = TimingDef(),
     val policy: NetworkPolicyDef = NetworkPolicyDef(),
     val detect: DetectDef = DetectDef(),
@@ -41,6 +43,9 @@ data class TimingDef(
     val maxIpWaitMs: Long = 3000L,
     /** 通知检测模式触发时，直接跳过“等待网络就绪”整段。 */
     val skipNetworkReadyOnNotify: Boolean = true,
+    /** 内网 Portal 的连接超时，别用 8 秒白等。 */
+    val connectTimeoutMs: Int = 6000,
+    val readTimeoutMs: Int = 6000,
 )
 
 /** 通道与出口策略。 */
@@ -53,6 +58,8 @@ data class NetworkPolicyDef(
     val rootSetDefault: Boolean = true,
     /** 优先网卡名（如 wlan0 / rmnet0 / eth0），为空则按传输类型挑。 */
     val preferredIfaces: List<String> = emptyList(),
+    /** 认证/检测请求强制走当前 WiFi 网卡（内网 Portal 只能从 wlan0 可达）。 */
+    val authOverWifi: Boolean = true,
 )
 
 /** 检测与重试。 */
@@ -89,6 +96,7 @@ data class CheckDef(
     val url: String,
     val onlineContains: String?,
     val offlineContains: String?,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 data class StepDef(
@@ -100,6 +108,7 @@ data class StepDef(
     val alreadyOnline: MatchDef?,
     val captures: List<CaptureDef>,
     val failMessageJsonPath: String?,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 data class MatchDef(

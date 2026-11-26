@@ -61,7 +61,7 @@ object LoginService {
 
     @JvmStatic
     @Throws(Exception::class)
-    fun doLogin(username: String, password: String, isp: String?, ip: String): LoginResult {
+    fun doLogin(username: String, password: String, isp: String?, ip: String, mac: String = "000000000000"): LoginResult {
         val plugin = PluginManager.active(AppContext.get())
         val inputs = HashMap<String, String>()
         inputs[Plugin.FIELD_USERNAME] = username
@@ -69,6 +69,7 @@ object LoginService {
         val suffix = isp?.let { if (it.startsWith("@")) it.substring(1) else it }
         val state = SessionState(plugin, inputs, suffix)
         state.ip = ip
+        state.mac = mac
         state.loginUrlOverride = PluginRuntime.getEffectiveLoginUrl(
             AppContext.get(), PrefUtils.getLoginUrl(AppContext.get()))
         val outcome = PluginRuntime.login(state)

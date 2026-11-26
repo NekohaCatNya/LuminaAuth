@@ -16,6 +16,8 @@ class SessionState(
         ?: ""
 
     var ip: String? = null
+    /** 当前 wlan0 的 MAC（12 位十六进制，无冒号）；拿不到时退回全 0。 */
+    var mac: String = "000000000000"
     /** Optional base override applied to the first login request URL. */
     var loginUrlOverride: String? = null
     var rand: Int = (1000..9999).random()
@@ -33,6 +35,7 @@ class SessionState(
             "isp" -> ispSuffix
             "ip" -> ip
             "rand" -> rand.toString()
+            "mac" -> mac
             else -> inputs[key] ?: vars[key]
         }
     }

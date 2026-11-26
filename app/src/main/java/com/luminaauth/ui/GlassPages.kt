@@ -312,7 +312,8 @@ fun SettingsPageGlass(
     val scope = rememberCoroutineScope()
 
     var enhancedMode by remember { mutableStateOf(PrefUtils.isEnhancedModeEnabled(context)) }
-    var notifyDetect by remember { mutableStateOf(PrefUtils.isNotifyDetectEnabled(context)) }
+    var detectMode by remember { mutableStateOf(PrefUtils.getDetectMode(context)) }
+    val notifyDetect = detectMode == PrefUtils.MODE_NOTIFY
     var netChannel by remember {
         mutableStateOf(PrefUtils.getNetChannel(context).coerceIn(0, NetworkChannel.labels.lastIndex))
     }
@@ -357,9 +358,10 @@ fun SettingsPageGlass(
 
     LaunchedEffect(notifyAccessGranted) {
         if (!notifyAccessGranted && notifyDetect) {
-            notifyDetect = false
-            PrefUtils.setNotifyDetectEnabled(context, false)
-            LogBuffer.add("UI", "notifyaccess=revoked detect=off")
+            detectMode = PrefUtils.MODE_EVENT
+            PrefUtils.setDetectMode(context, PrefUtils.MODE_EVENT)
+            LogBuffer.add("UI", "notifyaccess=revoked detect=event")
+            AutoLoginService.restartPolling(context)
             LogBuffer.addDetail("NTFY", "access=revoked detect=force_off")
         }
     }
@@ -384,12 +386,14 @@ fun SettingsPageGlass(
             if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 enhancedMode = true
                 PrefUtils.setEnhancedModeEnabled(context, true)
+                AutoLoginService.restartPolling(context)
                 ShizukuUtils.init(context)
                 LogBuffer.add("UI", "enhanced=on via=shizuku")
                 AutoLoginService.boostPriorityIfEnhanced(context)
             } else {
                 enhancedMode = false
                 PrefUtils.setEnhancedModeEnabled(context, false)
+                AutoLoginService.restartPolling(context)
             }
         }
         Shizuku.addRequestPermissionResultListener(listener)
@@ -478,32 +482,6 @@ fun SettingsPageGlass(
                     },
                 )
                 PreferenceSwitch(
-                    title = "通知检测模式",
-                    summary = if (notifyAccessGranted && !listenerConnected) "监听未连接，点按本行可请求重新绑定" else "由通知栏推送触发认证，比轮询更快",
-                    icon = null,
-                    checked = notifyDetect && notifyAccessGranted,
-                    onCheckedChange = { on ->
-                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
-                        if (on) {
-                            if (notifyAccessGranted) {
-                                notifyDetect = true
-                                PrefUtils.setNotifyDetectEnabled(context, true)
-                                LogBuffer.add("UI", "detect=on")
-                            } else {
-                                try {
-                                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                                } catch (e: Exception) {
-                                    LogBuffer.addDetail("NTFY", "open_settings err=" + e.message)
-                                }
-                            }
-                        } else {
-                            notifyDetect = false
-                            PrefUtils.setNotifyDetectEnabled(context, false)
-                            LogBuffer.add("UI", "detect=off")
-                        }
-                    },
-                )
-                PreferenceSwitch(
                     title = when {
                         hasRoot -> "增强模式（root）"
                         hasShizuku -> "增强模式（Shizuku）"
@@ -524,12 +502,14 @@ fun SettingsPageGlass(
                                         rootOk -> {
                                             hasRoot = true
                                             PrefUtils.setEnhancedModeEnabled(context, true)
+                                            AutoLoginService.restartPolling(context)
                                             LogBuffer.add("UI", "enhanced=on via=root")
                                             AutoLoginService.boostPriorityIfEnhanced(context)
                                         }
                                         shizukuReady -> {
                                             hasShizuku = true
                                             PrefUtils.setEnhancedModeEnabled(context, true)
+                                            AutoLoginService.restartPolling(context)
                                             ShizukuUtils.init(context)
                                             LogBuffer.add("UI", "enhanced=on via=shizuku")
                                             AutoLoginService.boostPriorityIfEnhanced(context)
@@ -540,12 +520,14 @@ fun SettingsPageGlass(
                                             } catch (e: Exception) {
                                                 enhancedMode = false
                                                 PrefUtils.setEnhancedModeEnabled(context, false)
+                                                AutoLoginService.restartPolling(context)
                                                 LogBuffer.add("UI", "enhanced shizuku grant_err=" + e.message)
                                             }
                                         }
                                         else -> {
                                             enhancedMode = false
                                             PrefUtils.setEnhancedModeEnabled(context, false)
+                                            AutoLoginService.restartPolling(context)
                                         }
                                     }
                                 }
@@ -553,6 +535,7 @@ fun SettingsPageGlass(
                         } else {
                             enhancedMode = false
                             PrefUtils.setEnhancedModeEnabled(context, false)
+                            AutoLoginService.restartPolling(context)
                             LogBuffer.add("UI", "enhanced=off")
                         }
                     },
@@ -578,6 +561,47 @@ fun SettingsPageGlass(
                             "CHANNEL: " + NetworkChannel.labels.getOrElse(it) { "na" } +
                                 (if (iface.isEmpty()) " (failed)" else " iface=$iface"),
                         )
+                    },
+                )
+                // 检测方式：与发送通道同属一个卡片
+                PreferenceDropdown(
+                    title = "检测方式",
+                    summary = when {
+                        enhancedMode -> "增强模式已开启：仍保留轮询兜底"
+                        detectMode == PrefUtils.MODE_NOTIFY && !notifyAccessGranted ->
+                            "未授予通知使用权，点按切换会跳转系统授权页"
+                        detectMode == PrefUtils.MODE_NOTIFY && !listenerConnected ->
+                            "监听未连接，切换回本项可请求重新绑定"
+                        detectMode == PrefUtils.MODE_NOTIFY ->
+                            "由通知栏推送触发认证，比轮询更快"
+                        else ->
+                            "网络变化时重新读取 SSID，命中目标列表才认证"
+                    },
+                    icon = null,
+                    items = listOf("事件驱动", "通知检测"),
+                    selectedIndex = if (detectMode == PrefUtils.MODE_NOTIFY) 1 else 0,
+                    onSelectedIndexChange = { index ->
+                        haptic.performHapticFeedback(
+                            androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate
+                        )
+                        val mode = if (index == 1) PrefUtils.MODE_NOTIFY else PrefUtils.MODE_EVENT
+                        detectMode = mode
+                        PrefUtils.setDetectMode(context, mode)
+                        LogBuffer.add("UI", "detect_mode=$mode")
+                        if (mode == PrefUtils.MODE_NOTIFY) {
+                            if (!notifyAccessGranted) {
+                                // 没有通知使用权：先记下选择，再跳系统授权页
+                                try {
+                                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                                } catch (e: Exception) {
+                                    LogBuffer.addDetail("NTFY", "open_settings err=" + e.message)
+                                }
+                            } else {
+                                GatewayNotificationListener.requestRebind(context)
+                            }
+                        }
+                        // 让前台服务重新装配触发源（事件驱动/轮询）
+                        AutoLoginService.restartPolling(context)
                     },
                 )
             }

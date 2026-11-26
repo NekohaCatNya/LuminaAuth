@@ -205,10 +205,21 @@ static void parseResponse(const std::string& raw, HttpResult& r) {
     if ((int)r.body.size() > kMaxBodyBytes) r.body.resize(kMaxBodyBytes);
 }
 
+// 插件声明之外的兜底头：保证老插件不带 headers 时行为不变。
+static bool headerPresent(const std::string& block, const std::string& name) {
+    std::string lowerBlock = block;
+    for (auto& c : lowerBlock) c = (char)tolower((unsigned char)c);
+    std::string lowerName = name;
+    for (auto& c : lowerName) c = (char)tolower((unsigned char)c);
+    return lowerBlock.find("\n" + lowerName + ":") != std::string::npos ||
+           lowerBlock.rfind(lowerName + ":", 0) == 0;
+}
+
 HttpResult httpRequest(const std::string& method,
                        const std::string& url,
                        const std::string& body,
                        const std::string& referer,
+                       const std::string& extraHeaders,
                        int timeoutMs) {
     HttpResult r;
     UrlParts p = parseUrl(url);
@@ -228,13 +239,17 @@ HttpResult httpRequest(const std::string& method,
     std::ostringstream req;
     req << method << " " << p.path << " HTTP/1.1\r\n";
     req << "Host: " << p.host << "\r\n";
-    req << "User-Agent: " << kUserAgent << "\r\n";
-    req << "Accept: */*\r\n";
-    if (!referer.empty()) req << "Referer: " << referer << "\r\n";
-    if (method == "POST") {
-        req << "Content-Type: application/x-www-form-urlencoded\r\n";
-        req << "Content-Length: " << body.size() << "\r\n";
+    // 插件 headers 原样写进请求（名值均剔除 CR/LF，避免头注入）
+    if (!extraHeaders.empty()) req << extraHeaders;
+    if (!headerPresent(extraHeaders, "User-Agent")) req << "User-Agent: " << kUserAgent << "\r\n";
+    if (!headerPresent(extraHeaders, "Accept")) req << "Accept: */*\r\n";
+    if (!referer.empty() && !headerPresent(extraHeaders, "Referer")) {
+        req << "Referer: " << referer << "\r\n";
     }
+    if (method == "POST" && !headerPresent(extraHeaders, "Content-Type")) {
+        req << "Content-Type: application/x-www-form-urlencoded\r\n";
+    }
+    if (method == "POST") req << "Content-Length: " << body.size() << "\r\n";
     req << "Connection: close\r\n\r\n";
     if (method == "POST") req << body;
 

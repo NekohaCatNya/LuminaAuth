@@ -17,22 +17,26 @@ object PluginLoader {
     private val ROOT_KEYS = setOf(
         "id", "name", "version", "description", "network",
         "sandbox", "sandbox_hosts", "fields", "isps", "check", "login",
-        "timing", "detect",
+        "timing", "detect", "headers",
     )
     private val NETWORK_KEYS = setOf(
         "ssid", "bind_process", "promote_network", "root_set_default", "preferred_ifaces",
+        "auth_over_wifi",
     )
-    private val TIMING_KEYS = setOf("ip_poll_ms", "max_ip_wait_ms", "skip_network_ready_on_notify")
+    private val TIMING_KEYS = setOf(
+        "ip_poll_ms", "max_ip_wait_ms", "skip_network_ready_on_notify",
+        "connect_timeout_ms", "read_timeout_ms",
+    )
     private val DETECT_KEYS = setOf("retry_count", "retry_delay_ms")
     private val SANDBOX_KEYS = setOf("hosts")
     private val FIELD_KEYS = setOf("id", "name", "type", "required")
     private val ISP_KEYS = setOf("id", "suffix", "name", "label", "default")
-    private val CHECK_KEYS = setOf("method", "url", "online_when", "offline_when")
+    private val CHECK_KEYS = setOf("method", "url", "online_when", "offline_when", "headers")
     private val MATCH_KEYS = setOf("contains", "regex", "json", "json_path", "json_equals")
     private val JSON_KEYS = setOf("path", "equals")
     private val LOGIN_KEYS = setOf("steps")
     private val STEP_KEYS = setOf(
-        "name", "method", "url", "expect_status",
+        "name", "method", "url", "expect_status", "headers",
         "success_when", "already_online_when", "capture", "fail",
     )
     private val CAPTURE_KEYS = setOf("name", "json_path", "regex", "group")
@@ -97,6 +101,7 @@ object PluginLoader {
             loginSteps = steps,
             source = source,
             fileName = fileName,
+            headers = readHeaders(root["headers"], "顶层.headers"),
             timing = timing,
             policy = policy,
             detect = detect,
@@ -253,6 +258,7 @@ object PluginLoader {
             url,
             readSimpleMatch(section, "online_when"),
             readSimpleMatch(section, "offline_when"),
+            readHeaders(section["headers"], "check.headers"),
         )
     }
 
@@ -309,6 +315,7 @@ object PluginLoader {
                     ?.let { readMatch(it, "$where.already_online_when") },
                 captures = readCaptures(m["capture"], where),
                 failMessageJsonPath = readFail(m, where),
+                headers = readHeaders(m["headers"], "$where.headers"),
             )
         }
     }
@@ -393,6 +400,8 @@ object PluginLoader {
             ipPollMs = section.longOr("ip_poll_ms", "timing", 250L).coerceIn(50L, 3000L),
             maxIpWaitMs = section.longOr("max_ip_wait_ms", "timing", 3000L).coerceIn(0L, 30000L),
             skipNetworkReadyOnNotify = section.boolOr("skip_network_ready_on_notify", "timing", true),
+            connectTimeoutMs = section.longOr("connect_timeout_ms", "timing", 6000L).toInt().coerceIn(500, 30000),
+            readTimeoutMs = section.longOr("read_timeout_ms", "timing", 6000L).toInt().coerceIn(500, 30000),
         )
     }
 
@@ -403,6 +412,7 @@ object PluginLoader {
             promoteNetwork = network.boolOr("promote_network", "network", true),
             rootSetDefault = network.boolOr("root_set_default", "network", true),
             preferredIfaces = readIfaces(network["preferred_ifaces"]),
+            authOverWifi = network.boolOr("auth_over_wifi", "network", true),
         )
     }
 
@@ -446,6 +456,25 @@ object PluginLoader {
                 else -> throw PluginParseException("$where.$key 不是布尔值：只能是 true 或 false")
             }
         }
+    }
+
+
+    /** 请求头：只允许标量键值，名值都不能为空；值支持 ${...} 模板（按调用处展开）。 */
+    private fun readHeaders(raw: Any?, where: String): Map<String, String> {
+        if (raw == null) return emptyMap()
+        val map = raw as? Map<*, *> ?: throw PluginParseException(
+            "$where 必须是键值映射（Referer: \"http://...\"），当前是${typeName(raw)}",
+        )
+        val out = LinkedHashMap<String, String>()
+        map.forEach { (k, v) ->
+            val name = k?.toString()?.trim().orEmpty()
+            if (name.isEmpty()) throw PluginParseException("$where 出现空请求头名")
+            if (v is Map<*, *> || v is List<*>) throw PluginParseException("$where.$name 必须是文本，当前是${typeName(v)}")
+            val value = v?.toString()?.trim().orEmpty()
+            if (value.isEmpty()) throw PluginParseException("$where.$name 是空值")
+            out[name] = value
+        }
+        return out
     }
 
     // ---------------- URL 白名单 ----------------

@@ -72,7 +72,7 @@ object PluginManager {
     private fun emptyPlugin(): Plugin = Plugin(
         id = "", name = "", version = 0, description = "",
         ssidPatterns = emptyList(), hosts = emptyList(), fields = emptyList(),
-        isps = emptyList(), check = null, loginSteps = emptyList(),
+        isps = emptyList(), check = null, loginSteps = emptyList(), headers = emptyMap(),
         source = PluginSource.BUILTIN, fileName = "",
     )
 

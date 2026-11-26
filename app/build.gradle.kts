@@ -13,7 +13,7 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = 36
-        versionCode = 244
+        versionCode = 253
         versionName = "1.1.5"
 
         externalNativeBuild {

@@ -21,9 +21,12 @@ object NativeBridge {
     @JvmStatic external fun nativeGetAllText(isDetail: Boolean): String
     @JvmStatic external fun nativeClear(isDetail: Boolean)
     @JvmStatic external fun nativeParseDrcom(body: String): String
-    /** 原生 socket HTTP：返回 {"code":200,"body":"...","error":""}，error 非空即传输层失败。 */
+    /**
+     * 原生 socket HTTP：返回 {"code":200,"body":"...","error":""}，error 非空即传输层失败。
+     * [headers] 是插件声明好的请求头块（每行 "Name: Value"），由 Kotlin 侧统一拼装。
+     */
     @JvmStatic external fun nativeHttpRequest(
-        method: String, url: String, body: String?, referer: String?, timeoutMs: Int
+        method: String, url: String, body: String?, referer: String?, headers: String?, timeoutMs: Int
     ): String
     @JvmStatic external fun nativeTcpPing(host: String, port: Int): Boolean
     @JvmStatic external fun nativeResolveHost(host: String): String

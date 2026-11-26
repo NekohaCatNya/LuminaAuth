@@ -18,6 +18,7 @@ HttpResult httpRequest(const std::string& method,
                        const std::string& url,
                        const std::string& body,
                        const std::string& referer,
+                       const std::string& extraHeaders,
                        int timeoutMs);
 
 // TCP connect check

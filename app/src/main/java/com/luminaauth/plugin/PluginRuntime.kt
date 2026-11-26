@@ -35,7 +35,12 @@ object PluginRuntime {
                 LogBuffer.addDetail("PLUGIN", "template unresolved key=$key")
             }
             LogBuffer.addDetail("PLUGIN", "check step=begin method=${def.method} host=${hostOf(url)}")
-            val resp = SandboxHttp.execute(state.plugin, def.method, url)
+            val resp = SandboxHttp.execute(
+                state.plugin, def.method, url,
+                connectTimeoutMs = state.plugin.timing.connectTimeoutMs,
+                readTimeoutMs = state.plugin.timing.readTimeoutMs,
+                headers = expandHeaders(mergeHeaders(state.plugin.headers, def.headers), state),
+            )
             if (!resp.ok) {
                 state.reason = resp.transportError ?: "transport"
                 state.detail = resp.transportError ?: ""
@@ -65,6 +70,32 @@ object PluginRuntime {
         }
     }
 
+
+    /** 全局默认头 + 局部头：同名（忽略大小写）以局部声明为准。 */
+    private fun mergeHeaders(base: Map<String, String>, extra: Map<String, String>): Map<String, String> {
+        if (base.isEmpty()) return extra
+        if (extra.isEmpty()) return base
+        val out = LinkedHashMap<String, String>(base)
+        extra.forEach { (k, v) ->
+            val existing = out.keys.firstOrNull { it.equals(k, true) }
+            if (existing != null) out.remove(existing)
+            out[k] = v
+        }
+        return out
+    }
+
+    /** 请求头值里的 ${...} 走同一套模板解析（如 Referer 带动态 host）。 */
+    private fun expandHeaders(headers: Map<String, String>, state: SessionState): Map<String, String> {
+        if (headers.isEmpty()) return headers
+        val out = LinkedHashMap<String, String>(headers.size)
+        headers.forEach { (k, v) ->
+            out[k] = PluginRules.expand(v, { state.resolve(it) }) { key ->
+                LogBuffer.addDetail("PLUGIN", "header template unresolved key=$key")
+            }
+        }
+        return out
+    }
+
     fun login(state: SessionState): Outcome {
         return try {
             val plugin = state.plugin
@@ -79,7 +110,12 @@ object PluginRuntime {
                     "PLUGIN",
                     "login step=${step.name} begin method=${step.method} host=${hostOf(url)}",
                 )
-                val resp = SandboxHttp.execute(plugin, step.method, url)
+                val resp = SandboxHttp.execute(
+                    plugin, step.method, url,
+                    connectTimeoutMs = plugin.timing.connectTimeoutMs,
+                    readTimeoutMs = plugin.timing.readTimeoutMs,
+                    headers = expandHeaders(mergeHeaders(plugin.headers, step.headers), state),
+                )
                 if (!resp.ok) {
                     state.reason = resp.transportError ?: "transport"
                     state.detail = resp.transportError ?: ""

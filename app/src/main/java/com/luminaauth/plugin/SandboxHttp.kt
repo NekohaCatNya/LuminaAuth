@@ -30,9 +30,15 @@ object SandboxHttp {
         val ok: Boolean get() = transportError == null
     }
 
-    private const val USER_AGENT =
+    /** 仅当插件没有声明 User-Agent 时使用的兜底值，保证老插件行为不变。 */
+    private const val FALLBACK_UA =
         "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/153.0.0.0 Mobile Safari/537.36"
+
+    /** 不能由 HttpURLConnection 手动设置的受限头，交给系统自己算。 */
+    private val RESTRICTED_HEADERS = setOf(
+        "host", "content-length", "connection", "transfer-encoding", "content-encoding",
+    )
 
     fun execute(
         plugin: Plugin,
@@ -41,6 +47,7 @@ object SandboxHttp {
         body: String? = null,
         connectTimeoutMs: Int = 8000,
         readTimeoutMs: Int = 8000,
+        headers: Map<String, String> = emptyMap(),
     ): Response {
         val uri = try {
             URI(urlString)
@@ -58,11 +65,18 @@ object SandboxHttp {
             return Response(-1, "", "host_denied: $host:$port")
         }
 
+        val normalized = normalizeHeaders(headers)
+        val referer = normalized.entries.firstOrNull { it.key.equals("Referer", true) }?.value
         val iface = NetworkChannel.boundIface
         // http 请求优先走原生 socket：SO_BINDTODEVICE 直接锁网卡出站，
         // 不受系统默认路由（未认证 WiFi 常常没有默认路由）影响。
         if (scheme == "http" && iface.isNotEmpty()) {
-            val native = executeNative(method, urlString, body, maxOf(connectTimeoutMs, readTimeoutMs))
+            val native = executeNative(
+                method, urlString, body,
+                maxOf(connectTimeoutMs, readTimeoutMs),
+                referer = referer,
+                headers = normalized,
+            )
             if (native != null && native.ok) return native
             LogBuffer.addDetail(
                 "PLUGIN",
@@ -82,7 +96,12 @@ object SandboxHttp {
                 connectTimeout = connectTimeoutMs
                 readTimeout = readTimeoutMs
                 instanceFollowRedirects = false
-                setRequestProperty("User-Agent", USER_AGENT)
+                // 请求头全部来自插件；只有插件没写时才补默认 UA / Accept
+                val hasUa = normalized.keys.any { it.equals("User-Agent", true) }
+                if (!hasUa) setRequestProperty("User-Agent", FALLBACK_UA)
+                normalized.forEach { (k, v) ->
+                    if (k.lowercase() !in RESTRICTED_HEADERS) setRequestProperty(k, v)
+                }
             }
             if (method == "POST" && body != null) {
                 conn.doOutput = true
@@ -127,10 +146,16 @@ object SandboxHttp {
         url: String,
         body: String?,
         timeoutMs: Int,
+        referer: String? = null,
+        headers: Map<String, String> = emptyMap(),
     ): Response? {
         if (!NativeBridge.isNativeAvailable()) return null
         return try {
-            val json = NativeBridge.nativeHttpRequest(method, url, body, null, timeoutMs)
+            val json = NativeBridge.nativeHttpRequest(
+                method, url, body, referer,
+                buildHeaderBlock(headers, dropReferer = !referer.isNullOrEmpty()),
+                timeoutMs,
+            )
             if (json.isEmpty()) return null
             val obj = org.json.JSONObject(json)
             val err = obj.optString("error")
@@ -144,6 +169,36 @@ object SandboxHttp {
         } catch (e: Throwable) {
             Response(-1, "", "native: ${e.javaClass.simpleName}")
         }
+    }
+
+
+    /** 合并、去重、过滤换行（头注入防御）；键名保持插件写法。 */
+    private fun normalizeHeaders(headers: Map<String, String>): Map<String, String> {
+        if (headers.isEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, String>(headers.size)
+        headers.forEach { (rawKey, rawValue) ->
+            val key = rawKey.trim().replace("\r", "").replace("\n", "")
+            val value = rawValue.trim().replace("\r", "").replace("\n", "")
+            if (key.isEmpty() || value.isEmpty()) return@forEach
+            // 同名（忽略大小写）以最后一次声明为准
+            val existing = out.keys.firstOrNull { it.equals(key, true) }
+            if (existing != null) out.remove(existing)
+            out[key] = value
+        }
+        return out
+    }
+
+    /** 原生侧需要的是整块 "Name: Value\r\n" 文本。 */
+    private fun buildHeaderBlock(headers: Map<String, String>, dropReferer: Boolean): String {
+        if (headers.isEmpty()) return ""
+        val sb = StringBuilder()
+        headers.forEach { (k, v) ->
+            if (dropReferer && k.equals("Referer", true)) return@forEach
+            if (k.equals("Host", true) || k.equals("Content-Length", true) ||
+                k.equals("Connection", true) || k.equals("Accept-Encoding", true)) return@forEach
+            sb.append(k).append(": ").append(v).append("\r\n")
+        }
+        return sb.toString()
     }
 
     private fun isHostAllowed(plugin: Plugin, host: String, declaredPort: Int): Boolean {
