@@ -443,8 +443,9 @@ fun SchoolAutologinApp() {
                 ),
             ),
             backdrop = com.luminaauth.ui.glass.uiGlassBackdrop(),
-            blurRadius = 24.dp,
-            tintStrength = 1f,
+            // 走 HyperIsland 的 LiquidGlass 分支，不是 OS3/OS4；模糊再压到 10dp，底色留 20% 透明
+            blurRadius = 10.dp,
+            tintStrength = 0.80f,
             enabled = true,
             modifier = Modifier,
         )

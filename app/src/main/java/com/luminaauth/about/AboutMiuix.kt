@@ -4,6 +4,7 @@ import android.os.Build
 import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -117,6 +118,7 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import com.luminaauth.ui.glass.GlassAlertDialog
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -240,11 +242,43 @@ fun AboutScreenMiuix(
         }
         GlassAlertDialog(
             show = showUpdateDialog && rel != null,
-            title = if (dialogPhase == DialogPhase.Progress) "更新中…" else "更新说明",
-            summary = "",
-            onDismissRequest = { showUpdateDialog = false },
+            title = null,
+            summary = null,
+            // 点空白不关闭；只保留左上角向下箭头收起
+            onDismissRequest = {},
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                ) {
+                    Icon(
+                        imageVector = MiuixIcons.ExpandMore,
+                        contentDescription = "收起更新",
+                        tint = colorScheme.onSurface,
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .size(40.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { showUpdateDialog = false }
+                            .padding(9.dp)
+                    )
+                    Text(
+                        text = if (dialogPhase == DialogPhase.Progress) "更新中…" else "更新说明",
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth()
+                            .padding(horizontal = 48.dp),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = colorScheme.onSurface,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
                 Crossfade(
                     targetState = dialogPhase,
                     animationSpec = tween(durationMillis = 300),
@@ -330,7 +364,6 @@ fun AboutScreenMiuix(
                                 progress = if (downloadTotal > 0) downloadDone.toFloat() / downloadTotal else 0f,
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            Spacer(Modifier.height(8.dp))
                             val speedStr = if (downloadSpeed >= 1024 * 1024) {
                                 String.format(Locale.US, "%.1f MB/s", downloadSpeed / (1024.0 * 1024.0))
                             } else if (downloadSpeed >= 1024) {
@@ -339,9 +372,13 @@ fun AboutScreenMiuix(
                                 "$downloadSpeed B/s"
                             }
                             Text(
-                                "$speedStr · $pct%",
+                                "$speedStr · $pct% · ${formatBytes(downloadDone)}/${formatBytes(downloadTotal)}",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
                                 fontSize = 13.sp,
-                                color = colorScheme.onSurfaceVariantSummary
+                                color = colorScheme.onSurfaceVariantSummary,
+                                textAlign = TextAlign.End
                             )
                         }
                     }
@@ -843,6 +880,17 @@ private sealed interface UpdateUi {
 }
 
 private enum class DialogPhase { Loading, Notes, Progress }
+
+/** 下载大小换算：B / KB / MB / GB，二进制单位，保留合适精度。 */
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format(Locale.US, "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format(Locale.US, "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(Locale.US, "%.2f GB", gb)
+}
 
 /** 与设置页「去开启 / 已开启」按钮一致：自动高、14/7dp 内边距、12dp 圆角、12% 同色底、13sp 中等字重 */
 @Composable
