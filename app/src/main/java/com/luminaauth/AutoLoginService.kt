@@ -181,6 +181,7 @@ class AutoLoginService : Service() {
     private var lastEvtSig: String? = null
     private var lastEvtAt = 0L
     private var eventRetryCount = 0
+    private var lastSsidWarnAt = 0L
 
     private val notifyKeys = HashSet<String>()
     private var lastNotifyKey: String? = null
@@ -516,6 +517,7 @@ class AutoLoginService : Service() {
         LogBuffer.add("SVC", "stop")
         try { unregisterReceiver(networkReceiver) } catch (_: Exception) {}
         unregisterNetworkCallback()
+        try { NetworkChannel.unbindProcess() } catch (_: Throwable) {}
         handler?.removeCallbacks(pollTask)
         handler?.removeCallbacks(keepAliveTask)
         bgThread?.quitSafely()
@@ -650,6 +652,7 @@ class AutoLoginService : Service() {
             } else {
                 eventRetryCount = 0
                 evtLog("ssid_na", "skip reason=ssid_unreadable src=$reason retry=give_up")
+                warnSsidUnreadable()
             }
             return
         }
@@ -715,9 +718,19 @@ class AutoLoginService : Service() {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 ?: return null
             val info = wifi.connectionInfo ?: return null
-            if (info.supplicantState != SupplicantState.COMPLETED) return null
+            val state = info.supplicantState
             val ssid = normalizeSsid(info.ssid)
-            if (ssid.isEmpty() || ssid.equals("<unknown ssid>", ignoreCase = true)) null else ssid
+            if (ssid.isEmpty() || ssid.equals("<unknown ssid>", ignoreCase = true)) {
+                LogBuffer.addDetail("EVT", "ssid_read state=$state ssid=unknown")
+                return null
+            }
+            // 屏幕熄灭后部分 ROM 会把 supplicant 置为 DORMANT（省电态），此时 WiFi 仍连着、
+            // SSID 也有效。旧逻辑硬要求 COMPLETED，会导致后台整段时间全部 ssid_unreadable。
+            if (state != SupplicantState.COMPLETED && state != SupplicantState.DORMANT) {
+                LogBuffer.addDetail("EVT", "ssid_read state=$state act=skip")
+                return null
+            }
+            ssid
         } catch (_: Throwable) {
             null
         }
@@ -867,6 +880,18 @@ class AutoLoginService : Service() {
         }
     }
 
+    private fun warnSsidUnreadable() {
+        val now = System.currentTimeMillis()
+        if (now - lastSsidWarnAt < 60_000L) return
+        lastSsidWarnAt = now
+        updateStatus(
+            this,
+            "校园网自动认证",
+            "已连接 WiFi，但暂时读不到网络名称；若持续出现，请把定位权限设为始终允许并开启定位"
+        )
+        LogBuffer.add("SVC", "ssid_unreadable notify=1")
+    }
+
     private fun performAutoLogin(ssid: String) {
         if (!PrefUtils.isAutoAuthEnabled(this)) return
         val cfg = PrefUtils.loadConfig(this) ?: run {
@@ -881,7 +906,7 @@ class AutoLoginService : Service() {
                 if (justLeft) LogBuffer.add("MON", "campus=leave ssid=${if (ssid.isEmpty()) "na" else ssid}")
             }
             if (isWifiConnected() && ssid.isEmpty()) {
-                updateStatus(this, "校园网自动认证", "已连接 WiFi，但无法读取网络名称，请在系统设置中开启定位服务")
+                warnSsidUnreadable()
             }
             LogBuffer.addDetail("AUTH", "skip ssid=$ssid target=0")
             return
@@ -1095,7 +1120,10 @@ class AutoLoginService : Service() {
         }
         try {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-            wifi?.connectionInfo?.let { return normalizeSsid(it.ssid) }
+            wifi?.connectionInfo?.let {
+                val s = normalizeSsid(it.ssid)
+                if (s.isNotEmpty() && !s.equals("<unknown ssid>", ignoreCase = true)) return s
+            }
         } catch (_: Exception) {}
         return ""
     }

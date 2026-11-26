@@ -358,13 +358,29 @@ fun SchoolAutologinApp() {
                             LogBuffer.addDetail("AUTH", "manual begin")
                             Thread {
                                 try {
+                                    // 手动认证前重新解析当前通道：服务/系统可能刚换过 Network，
+                                    // 旧 boundNetwork 已失效时直接发请求会得到 ENETUNREACH。
+                                    val ch = PrefUtils.getNetChannel(context)
+                                        .coerceIn(0, NetworkChannel.labels.lastIndex)
+                                    val iface = NetworkChannel.applyChannel(ch)
+                                    NativeBridge.nativeSetBindIface(iface)
+                                    LogBuffer.addDetail("AUTH", "manual channel=${NetworkChannel.labels[ch]}"
+                                            + " iface=${iface.ifEmpty { "na" }}")
                                     val ip = LoginService.getLocalIPv4(context)
                                     if (ip == null) {
                                         statusText = "无法获取本机 IP，请连接 Wi-Fi"
                                         LogBuffer.addDetail("AUTH", "manual ip=na")
                                     } else {
-                                        val status = LoginService.checkNetworkStatus(ip)
+                                        var status = LoginService.checkNetworkStatus(ip)
                                         LogBuffer.addDetail("AUTH", "manual ip=$ip chk=$status")
+                                        if (status == "unreachable") {
+                                            // 门户刚放行/WiFi 刚重连时首次请求常瞬时不可达，刷新通道后重试一次
+                                            Thread.sleep(1200)
+                                            val iface2 = NetworkChannel.applyChannel(ch)
+                                            NativeBridge.nativeSetBindIface(iface2)
+                                            status = try { LoginService.checkNetworkStatus(ip) } catch (_: Exception) { status }
+                                            LogBuffer.addDetail("AUTH", "manual retry chk=$status iface=${iface2.ifEmpty { "na" }}")
+                                        }
                                         if ("online" == status) {
                                             statusText = "已在线，无需登录"
                                             AuthGlobalState.setStatus(AuthStatus.AUTH_SUCCESS)

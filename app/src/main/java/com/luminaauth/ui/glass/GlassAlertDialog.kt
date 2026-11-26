@@ -23,6 +23,7 @@ internal fun GlassAlertDialog(
     title: String? = null,
     summary: String? = null,
     onDismissRequest: () -> Unit,
+    onDismissFinished: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // 先让 Dock 下沉，再弹对话框：避免玻璃 Dock 压在对话框上
@@ -45,6 +46,7 @@ internal fun GlassAlertDialog(
         summary = summary,
         backdrop = uiGlassBackdrop(),
         onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             content()

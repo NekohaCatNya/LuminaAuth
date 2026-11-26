@@ -38,6 +38,12 @@ object NetworkChannel {
     @Volatile
     private var currentChannel: Int = -1
 
+    /** 本进程是否已被 bindProcessToNetwork 绑定，以及绑到了哪个 Network。 */
+    @Volatile
+    private var processBinding = false
+    @Volatile
+    private var processBoundNetwork: Network? = null
+
     /** 插件声明的优先网卡名，空表示按传输类型挑第一个可用。 */
     @Volatile
     var preferredIfaces: List<String> = emptyList()
@@ -70,10 +76,13 @@ object NetworkChannel {
         currentChannel = channel
         val transport = transportOf(channel)
         watch(channel, transport)
-        val network = pick(cm, transport) ?: boundNetwork?.takeIf { cm.getNetworkCapabilities(it)?.hasTransport(transport) == true }
+        // 只认真实还活在 allNetworks 里的 Network；旧代码会把已丢失的 boundNetwork
+        // 继续当兜底，WiFi 重连后进程仍绑在旧 Network 上，后续 socket 全部 ENETUNREACH。
+        val network = pick(cm, transport)
         boundNetwork = network
         val iface = ifaceOf(cm, network)
         boundIface = iface
+        syncProcessBinding(network)
         return iface
     }
 
@@ -117,6 +126,7 @@ object NetworkChannel {
                 boundNetwork = n
                 val iface = ifaceOf(cm, n)
                 boundIface = iface
+                syncProcessBinding(n)
                 LogBuffer.add("NET", "watch avail ch=${labels.getOrElse(channel) { "na" }} iface=${iface.ifEmpty { "na" }}")
             }
 
@@ -124,8 +134,10 @@ object NetworkChannel {
                 if (boundNetwork != n) return
                 boundNetwork = pick(cm, transport)
                 boundIface = ifaceOf(cm, boundNetwork)
+                syncProcessBinding(boundNetwork)
                 LogBuffer.add("NET", "watch lost ch=${labels.getOrElse(channel) { "na" }}"
-                        + " rebind=" + (boundNetwork != null))
+                        + " rebind=" + (boundNetwork != null)
+                        + " process=" + (if (processBinding) 1 else 0))
             }
         }
         try {
@@ -152,7 +164,7 @@ object NetworkChannel {
         lastPromoteAt = now
 
         val transport = transportOf(channel)
-        val target = pick(cm, transport) ?: boundNetwork ?: return "skip:no-network"
+        val target = pick(cm, transport) ?: return "skip:no-network"
         val current = try { cm.activeNetwork } catch (_: Throwable) { null }
         if (current != null && current == target) return "already:default"
 
@@ -177,13 +189,75 @@ object NetworkChannel {
     }
 
     /** 把本进程流量绑定到指定网络；失败返回 false，不影响后续逻辑。 */
+    @Synchronized
     fun bindProcessTo(network: Network?): Boolean {
         val cm = connectivityManager ?: return false
-        if (network == null) return false
+        if (network == null) {
+            unbindProcess()
+            return false
+        }
+        // 未通过系统验证的 WiFi（刚登录/门户未放行）不能作为进程默认网络，
+        // 否则 App 自身所有请求都会落到一个没有 Internet 的网上，表现为“网络不可达”。
+        if (!isProcessBindable(cm, network)) {
+            LogBuffer.add("NET", "bind_process skip reason=not_validated")
+            unbindProcess()
+            return false
+        }
         return try {
             cm.bindProcessToNetwork(network)
+            processBinding = true
+            processBoundNetwork = network
+            LogBuffer.add("NET", "bind_process target=" + (ifaceOf(cm, network).ifEmpty { "na" }))
+            true
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    /** 解除进程绑定；网络丢失/服务停止/通道切换时必须调用，避免绑死在失效 Network 上。 */
+    @Synchronized
+    fun unbindProcess() {
+        if (!processBinding) return
+        try {
+            connectivityManager?.bindProcessToNetwork(null)
+            LogBuffer.add("NET", "bind_process unbind=1")
+        } catch (_: Throwable) {
+        } finally {
+            processBinding = false
+            processBoundNetwork = null
+        }
+    }
+
+    private fun isProcessBindable(cm: ConnectivityManager, network: Network): Boolean {
+        return try {
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /** 网络对象变化后同步进程绑定：换到新 Network；没有可用网络则解绑。 */
+    @Synchronized
+    private fun syncProcessBinding(target: Network?) {
+        if (!processBinding) return
+        if (target == null) {
+            unbindProcess()
+            return
+        }
+        if (target == processBoundNetwork) return
+        val cm = connectivityManager ?: return
+        if (!isProcessBindable(cm, target)) {
+            unbindProcess()
+            return
+        }
+        try {
+            cm.bindProcessToNetwork(target)
+            processBoundNetwork = target
+            LogBuffer.add("NET", "bind_process rebind=" + (ifaceOf(cm, target).ifEmpty { "na" }))
+        } catch (_: Throwable) {
+            unbindProcess()
         }
     }
 

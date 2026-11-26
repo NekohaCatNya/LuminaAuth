@@ -9,6 +9,8 @@
     <!-- 安卓 10+ 读取当前 WiFi 名称（SSID）必需定位权限 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- 后台读 SSID：部分 ROM 在应用退到后台后会隐藏 WiFi 名称 -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- 申请自启动权限（电池优化豁免） -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- 安卓 13+ 后台弹通知必需 -->

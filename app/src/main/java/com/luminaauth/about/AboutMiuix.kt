@@ -1,6 +1,10 @@
 package com.luminaauth.about
 
 import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.navigationevent.NavigationEventInfo
+import androidx.navigationevent.compose.NavigationBackHandler
+import androidx.navigationevent.compose.rememberNavigationEventState
 import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,6 +75,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -118,7 +123,6 @@ import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
-import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import com.luminaauth.ui.glass.GlassAlertDialog
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -181,6 +185,8 @@ fun AboutScreenMiuix(
     var downloadSpeed by remember { mutableLongStateOf(0L) }
     var lastTickTime by remember { mutableLongStateOf(0L) }
     var lastTickDone by remember { mutableLongStateOf(0L) }
+    var downloadActive by remember { mutableStateOf(false) }
+    var downloadError by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
@@ -199,8 +205,14 @@ fun AboutScreenMiuix(
                 onLogoHeightChanged = { logoHeightPx = it },
                 updateState = updateState,
                 showUpdateDialog = showUpdateDialog,
-                onShowUpdateDialog = { showUpdateDialog = it },
-                onDialogPhaseChange = { dialogPhase = it },
+                onShowUpdateDialog = { show ->
+                    // 下载中再次打开时直接回到进度页，不能重新走“更新说明”重复开下载
+                    if (show && dialogPhase != DialogPhase.Progress) {
+                        dialogPhase = DialogPhase.Loading
+                        downloadError = null
+                    }
+                    showUpdateDialog = show
+                },
             )
         }
 
@@ -226,7 +238,14 @@ fun AboutScreenMiuix(
             bandOverhang = 0.dp,
             navigationIcon = {
                 // 始终是玻璃圆钮，到顶时不再退化成透明箭头
-                top.yukonga.miuix.kmp.glass.GlassIconButton(onClick = actions.onBack) {
+                top.yukonga.miuix.kmp.glass.GlassIconButton(onClick = {
+                    // 弹窗打开时顶栏返回不能直接 finish，否则也会把 Activity 和弹窗一起拆掉
+                    if (showUpdateDialog) {
+                        if (dialogPhase != DialogPhase.Progress) showUpdateDialog = false
+                    } else {
+                        actions.onBack()
+                    }
+                }) {
                     Icon(MiuixIcons.Back, "返回")
                 }
             },
@@ -240,38 +259,65 @@ fun AboutScreenMiuix(
                 dialogPhase = DialogPhase.Notes
             }
         }
+
+        // 返回键/侧滑统一走这里：更新说明可以关，更新中只吃事件不退出，避免 Activity 被系统返回杀掉后界面卡死
+        BackHandler(enabled = showUpdateDialog && rel != null) {
+            if (dialogPhase != DialogPhase.Progress) {
+                showUpdateDialog = false
+            }
+        }
+
         GlassAlertDialog(
             show = showUpdateDialog && rel != null,
             title = null,
             summary = null,
-            // 点空白不关闭；只保留左上角向下箭头收起
-            onDismissRequest = {},
+            // 更新说明：点空白/返回都可关；更新中：全部拦截，只能点左上角向下箭头收起
+            onDismissRequest = {
+                if (dialogPhase != DialogPhase.Progress) {
+                    showUpdateDialog = false
+                }
+            },
+            // 内部动画结束后强制同步外部开关，防止弹窗自己收掉了但 show 还是 true，留下隐形遮罩把页面卡死
+            onDismissFinished = { showUpdateDialog = false },
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                // 更新中：在 miuix 自带的返回处理器之后再挂一个高优先级处理器，把侧滑事件吃掉。
+                // 否则 DialogContentLayout 的预测返回会直接把弹窗划出屏幕，但 show 仍为 true，留下隐形遮罩卡死页面。
+                if (dialogPhase == DialogPhase.Progress) {
+                    NavigationBackHandler(
+                        state = rememberNavigationEventState(currentInfo = NavigationEventInfo.None),
+                        isBackEnabled = true,
+                        onBackCompleted = {},
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(40.dp)
                 ) {
-                    Icon(
-                        imageVector = MiuixIcons.ExpandMore,
-                        contentDescription = "收起更新",
-                        tint = colorScheme.onSurface,
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .size(40.dp)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) { showUpdateDialog = false }
-                            .padding(9.dp)
-                    )
+                    // 只有“更新中”才保留左上角按钮；用 Back 箭头旋转成向下指的箭头，不是 ExpandMore
+                    if (dialogPhase == DialogPhase.Progress) {
+                        Icon(
+                            imageVector = MiuixIcons.Back,
+                            contentDescription = "收起更新中",
+                            tint = colorScheme.onSurface,
+                            modifier = Modifier
+                                .align(Alignment.CenterStart)
+                                .rotate(270f)
+                                .size(40.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) { showUpdateDialog = false }
+                                .padding(9.dp)
+                        )
+                    }
                     Text(
                         text = if (dialogPhase == DialogPhase.Progress) "更新中…" else "更新说明",
                         modifier = Modifier
                             .align(Alignment.Center)
                             .fillMaxWidth()
-                            .padding(horizontal = 48.dp),
+                            .padding(horizontal = if (dialogPhase == DialogPhase.Progress) 48.dp else 16.dp),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Medium,
                         color = colorScheme.onSurface,
@@ -311,6 +357,15 @@ fun AboutScreenMiuix(
                                     modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
+                            downloadError?.let { msg ->
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    msg,
+                                    fontSize = 12.sp,
+                                    color = colorScheme.error,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             Spacer(Modifier.height(16.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 TextButton(
@@ -321,35 +376,54 @@ fun AboutScreenMiuix(
                                 TextButton(
                                     text = "确定",
                                     onClick = {
+                                        if (downloadActive) {
+                                            dialogPhase = DialogPhase.Progress
+                                            return@TextButton
+                                        }
+                                        val r = rel ?: return@TextButton
                                         dialogPhase = DialogPhase.Progress
+                                        downloadError = null
+                                        downloadActive = true
                                         downloadDone = 0L
                                         downloadTotal = 0L
                                         downloadSpeed = 0L
                                         lastTickTime = System.currentTimeMillis()
                                         lastTickDone = 0L
-                                        val r = rel ?: return@TextButton
                                         val dest = File(context.externalCacheDir, "update.apk")
-                                        UpdateChecker.startDownload(
-                                            url = r.apkUrl,
-                                            dest = dest,
-                                            onProgress = { done, total ->
-                                                val now = System.currentTimeMillis()
-                                                val dt = now - lastTickTime
-                                                if (dt >= 500) {
-                                                    downloadSpeed = (done - lastTickDone) * 1000L / dt
-                                                    lastTickTime = now
-                                                    lastTickDone = done
-                                                }
-                                                downloadDone = done
-                                                downloadTotal = total
-                                            },
-                                            onDone = { f ->
-                                                UpdateChecker.install(context, f)
-                                            },
-                                            onError = {
-                                                dialogPhase = DialogPhase.Notes
-                                            },
-                                        )
+                                        runCatching {
+                                            UpdateChecker.startDownload(
+                                                url = r.apkUrl,
+                                                dest = dest,
+                                                onProgress = { done, total ->
+                                                    val now = System.currentTimeMillis()
+                                                    val dt = now - lastTickTime
+                                                    if (dt >= 500) {
+                                                        downloadSpeed = (done - lastTickDone) * 1000L / dt
+                                                        lastTickTime = now
+                                                        lastTickDone = done
+                                                    }
+                                                    downloadDone = done
+                                                    downloadTotal = total
+                                                },
+                                                onDone = { f ->
+                                                    // 下载完成先收掉进度弹窗，否则安装器返回后会停在 100% 的“更新中”
+                                                    downloadActive = false
+                                                    dialogPhase = DialogPhase.Notes
+                                                    showUpdateDialog = false
+                                                    // 用 Application Context：收起弹窗后离开关于页，下载完成仍能拉起安装器
+                                                    UpdateChecker.install(context.applicationContext, f)
+                                                },
+                                                onError = {
+                                                    downloadActive = false
+                                                    downloadError = "下载失败，请检查网络后重试"
+                                                    dialogPhase = DialogPhase.Notes
+                                                },
+                                            )
+                                        }.onFailure {
+                                            downloadActive = false
+                                            downloadError = "下载启动失败，请检查网络后重试"
+                                            dialogPhase = DialogPhase.Notes
+                                        }
                                     },
                                     modifier = Modifier.weight(1f)
                                 )
@@ -401,7 +475,6 @@ private fun AboutContent(
     updateState: UpdateUi,
     showUpdateDialog: Boolean,
     onShowUpdateDialog: (Boolean) -> Unit,
-    onDialogPhaseChange: (DialogPhase) -> Unit,
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
@@ -845,10 +918,7 @@ private fun AboutContent(
                                             text = "更新",
                                             accent = Color(0xFF4CAF50),
                                             enabled = true,
-                                            onClick = {
-                                                onDialogPhaseChange(DialogPhase.Loading)
-                                                onShowUpdateDialog(true)
-                                            }
+                                            onClick = { onShowUpdateDialog(true) }
                                         )
                                         is UpdateUi.Downloading -> Unit
                                         is UpdateUi.Installing -> Unit

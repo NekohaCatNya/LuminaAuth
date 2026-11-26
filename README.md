@@ -3,7 +3,7 @@
 校园网自动登录 Android 应用。连上目标校园网 WiFi 后自动完成 Portal 认证（DrCOM / 锐捷 / 深澜 / H3C 等），不用每次手动开浏览器输账号密码。认证差异全部由 **外置 YAML 插件** 描述，插件是纯数据，不含可执行代码。
 
 - 包名 `com.luminaauth` · minSdk 29 / targetSdk 36 / compileSdk 37
-- 当前版本 **vc255 / 1.1.6**，固定 release 证书，支持直接覆盖升级
+- 当前版本 **vc258 / 1.1.6**，固定 release 证书，支持直接覆盖升级
 - UI：Jetpack Compose + miuix-kmp + 液态玻璃（Dock 参考 HyperIsland）
 
 ## 功能
@@ -22,7 +22,7 @@
 
 ## 安装与首次使用
 
-1. 安装 `LuminaAuth-1.1.6-vc255-<abi>.apk`（不确定架构就装 `universal`）。
+1. 安装 `LuminaAuth-1.1.6-vc258-<abi>.apk`（不确定架构就装 `universal`）。
 2. 打开 App，授予定位（读 WiFi 名）、通知、电池优化等权限。
 3. 到「设置 → 高级设置 → 插件 → 导入插件」导入 `drcom-default.plugin.yaml`，点选为「使用中」。
 4. 在设置里填写校园网 WiFi 名称（多个用逗号分隔），然后打开「自动认证」。
