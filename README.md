@@ -3,7 +3,7 @@
 校园网自动登录 Android 应用。连上目标校园网 WiFi 后自动完成 Portal 认证（DrCOM / 锐捷 / 深澜 / H3C 等），不用每次手动开浏览器输账号密码。认证差异全部由 **外置 YAML 插件** 描述，插件是纯数据，不含可执行代码。
 
 - 包名 `com.luminaauth` · minSdk 29 / targetSdk 36 / compileSdk 37
-- 当前版本 **vc258 / 1.1.6**，固定 release 证书，支持直接覆盖升级
+- 当前版本 **vc259 / 1.1.6**，固定 release 证书，支持直接覆盖升级
 - UI：Jetpack Compose + miuix-kmp + 液态玻璃（Dock 参考 HyperIsland）
 
 ## 功能
@@ -22,7 +22,7 @@
 
 ## 安装与首次使用
 
-1. 安装 `LuminaAuth-1.1.6-vc258-<abi>.apk`（不确定架构就装 `universal`）。
+1. 安装 `LuminaAuth-1.1.6-vc259-<abi>.apk`（不确定架构就装 `universal`）。
 2. 打开 App，授予定位（读 WiFi 名）、通知、电池优化等权限。
 3. 到「设置 → 高级设置 → 插件 → 导入插件」导入 `drcom-default.plugin.yaml`，点选为「使用中」。
 4. 在设置里填写校园网 WiFi 名称（多个用逗号分隔），然后打开「自动认证」。
@@ -31,28 +31,28 @@
 
 ## 插件 YAML 速查
 
-插件只能访问 `sandbox.hosts` 白名单内的主机，请求由沙箱发出。
+插件只能访问 `sandbox.hosts` 白名单内的主机。`check` / `login.steps` 推荐直接写 `request: |`，把浏览器抓到的整段 HTTP 会话粘进去；第一行是请求行，`Host` 用于补全相对路径，空行后的内容作为 body。`Host` 和 `Content-Length` 由传输层重写，其余头（包括 `Accept-Encoding`）原样发送。
 
 ```yaml
 id: drcom-default
 name: DrCOM 默认校园网认证
-version: 4
+version: 5
 
-timing:                 # 可选，认证时序
+timing:
   ip_poll_ms: 250
   max_ip_wait_ms: 3000
   skip_network_ready_on_notify: true
 
-network:                # 可选，ssid 不写就不按网络名匹配
+network:
   ssid: [ChinaNet-JLZG, JLZG-5G]
   bind_process: true
   promote_network: true
   root_set_default: true
   preferred_ifaces: [wlan0, rmnet, eth0]
 
-detect:                 # 可选，重试策略
+detect:
   retry_count: 3
-  retry_delay_ms: 5000
+  retry_delay_ms: 3000
 
 sandbox:
   hosts: [218.6.130.195:801, 218.6.130.195:1333]
@@ -61,20 +61,29 @@ fields:
   - { id: username, name: 用户名, type: text, required: true }
   - { id: password, name: 密码, type: password, required: true }
 
-isps:
-  - { id: after, name: 教职工 }
-
 check:
-  method: GET
-  url: "http://218.6.130.195:1333/drcom/chkstatus?..."
+  request: |
+    GET /drcom/chkstatus?callback=dr1002&jsVersion=4.X&v=3328&lang=zh HTTP/1.1
+    Host: 218.6.130.195:1333
+    User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0
+    Accept: */*
+    Referer: http://218.6.130.195:1333/
+    Accept-Encoding: gzip, deflate
+    Accept-Language: zh-CN,zh;q=0.9
   online_when:  { contains: '"result":1' }
   offline_when: { contains: '"result":0' }
 
 login:
   steps:
     - name: auth
-      method: GET
-      url: "http://218.6.130.195:801/eportal/portal/login?...&user_account=,1,${username}@${isp}&user_password=${password}&wlan_user_ip=${ip}&v=${rand}"
+      request: |
+        GET /eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C1%2C${username}&user_password=${password}&wlan_user_ip=${ip}&wlan_user_ipv6=&wlan_user_mac=${mac}&wlan_ac_ip=218.89.190.11&wlan_ac_name=&jsVersion=4.1.3&terminal_type=2&lang=zh-cn&v=${rand}&lang=zh HTTP/1.1
+        Host: 218.6.130.195:801
+        User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0
+        Accept: */*
+        Referer: http://218.6.130.195:1333/
+        Accept-Encoding: gzip, deflate
+        Accept-Language: zh-CN,zh;q=0.9
       success_when: { json: { path: result, equals: "1" } }
       already_online_when: { contains: "已经在线" }
       fail: { json_path: msg }

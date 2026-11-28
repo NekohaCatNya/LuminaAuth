@@ -9,9 +9,11 @@ add_library(lumina-native SHARED
 )
 
 find_library(log-lib log)
+find_library(z-lib z)
 
 target_link_libraries(lumina-native
     ${log-lib}
+    ${z-lib}
 )
 
 target_compile_options(lumina-native PRIVATE

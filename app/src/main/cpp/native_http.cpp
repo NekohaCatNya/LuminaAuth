@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <sstream>
+#include <zlib.h>
 
 namespace lumina {
 
@@ -185,6 +186,32 @@ static std::string toLower(std::string s) {
     return s;
 }
 
+static bool inflateBody(const std::string& input, int windowBits, std::string& output) {
+    if (input.empty()) return false;
+    z_stream zs;
+    memset(&zs, 0, sizeof(zs));
+    if (inflateInit2(&zs, windowBits) != Z_OK) return false;
+    zs.next_in = (Bytef*) input.data();
+    zs.avail_in = (uInt) input.size();
+    char buf[16384];
+    int ret = Z_OK;
+    while (ret != Z_STREAM_END) {
+        zs.next_out = (Bytef*) buf;
+        zs.avail_out = sizeof(buf);
+        ret = inflate(&zs, Z_NO_FLUSH);
+        if (ret != Z_OK && ret != Z_STREAM_END) {
+            inflateEnd(&zs);
+            return false;
+        }
+        size_t produced = sizeof(buf) - zs.avail_out;
+        if (produced > 0) output.append(buf, produced);
+        if ((int) output.size() > kMaxBodyBytes) break;
+        if (ret == Z_OK && zs.avail_in == 0 && zs.avail_out != 0) break;
+    }
+    inflateEnd(&zs);
+    return ret == Z_STREAM_END || !output.empty();
+}
+
 static void parseResponse(const std::string& raw, HttpResult& r) {
     size_t headEnd = raw.find("\r\n\r\n");
     std::string head = (headEnd == std::string::npos) ? raw : raw.substr(0, headEnd);
@@ -200,8 +227,26 @@ static void parseResponse(const std::string& raw, HttpResult& r) {
         return;
     }
 
-    bool chunked = toLower(head).find("transfer-encoding: chunked") != std::string::npos;
+    const std::string lowerHead = toLower(head);
+    bool chunked = lowerHead.find("transfer-encoding: chunked") != std::string::npos;
     r.body = chunked ? decodeChunked(bodyRaw) : bodyRaw;
+    // 浏览器会带 Accept-Encoding: gzip, deflate；服务端可能真的压缩。
+    // 这里做解压，避免把 gzip 字节丢给 success_when 匹配。
+    if (lowerHead.find("content-encoding: gzip") != std::string::npos) {
+        std::string decoded;
+        if (!inflateBody(r.body, 15 + 16, decoded)) {
+            r.error = "gzip_decode_failed";
+            return;
+        }
+        r.body.swap(decoded);
+    } else if (lowerHead.find("content-encoding: deflate") != std::string::npos) {
+        std::string decoded;
+        if (!inflateBody(r.body, 15, decoded) && !inflateBody(r.body, -15, decoded)) {
+            r.error = "deflate_decode_failed";
+            return;
+        }
+        r.body.swap(decoded);
+    }
     if ((int)r.body.size() > kMaxBodyBytes) r.body.resize(kMaxBodyBytes);
 }
 
@@ -238,7 +283,11 @@ HttpResult httpRequest(const std::string& method,
 
     std::ostringstream req;
     req << method << " " << p.path << " HTTP/1.1\r\n";
-    req << "Host: " << p.host << "\r\n";
+    // Host 必须带非默认端口；抓包是 Host: 218.6.130.195:801，
+    // 旧代码发成 Host: 218.6.130.195，网关/风控会直接看出不是浏览器请求。
+    req << "Host: " << p.host;
+    if (p.port != 80) req << ":" << p.port;
+    req << "\r\n";
     // 插件 headers 原样写进请求（名值均剔除 CR/LF，避免头注入）
     if (!extraHeaders.empty()) req << extraHeaders;
     if (!headerPresent(extraHeaders, "User-Agent")) req << "User-Agent: " << kUserAgent << "\r\n";

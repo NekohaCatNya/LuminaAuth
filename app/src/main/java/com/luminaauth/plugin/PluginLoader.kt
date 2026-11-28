@@ -31,12 +31,12 @@ object PluginLoader {
     private val SANDBOX_KEYS = setOf("hosts")
     private val FIELD_KEYS = setOf("id", "name", "type", "required")
     private val ISP_KEYS = setOf("id", "suffix", "name", "label", "default")
-    private val CHECK_KEYS = setOf("method", "url", "online_when", "offline_when", "headers")
+    private val CHECK_KEYS = setOf("method", "url", "request", "online_when", "offline_when", "headers")
     private val MATCH_KEYS = setOf("contains", "regex", "json", "json_path", "json_equals")
     private val JSON_KEYS = setOf("path", "equals")
     private val LOGIN_KEYS = setOf("steps")
     private val STEP_KEYS = setOf(
-        "name", "method", "url", "expect_status", "headers",
+        "name", "method", "url", "request", "expect_status", "headers",
         "success_when", "already_online_when", "capture", "fail",
     )
     private val CAPTURE_KEYS = setOf("name", "json_path", "regex", "group")
@@ -49,15 +49,16 @@ object PluginLoader {
             throw PluginParseException("插件内容为空：文件里没有任何可解析的配置")
         }
 
+        val extracted = extractRawRequestBlocks(cleaned)
         val parsed = try {
-            YamlParser.parse(cleaned)
+            YamlParser.parse(extracted.text)
         } catch (e: PluginParseException) {
             throw e
         } catch (e: IllegalArgumentException) {
             throw PluginParseException("YAML 语法错误：${e.message}")
         }
 
-        val root = parsed as? Map<*, *>
+        val root = restoreRawRequestBlocks(parsed, extracted.blocks) as? Map<*, *>
             ?: throw PluginParseException("插件根节点必须是 key: value 映射，当前是${typeName(parsed)}")
         checkKeys(root, ROOT_KEYS, "顶层")
 
@@ -106,6 +107,72 @@ object PluginLoader {
             policy = policy,
             detect = detect,
         )
+    }
+
+    // ---------------- 原始 HTTP 会话块 ----------------
+
+    private data class ExtractedRawBlocks(
+        val text: String,
+        val blocks: Map<String, String>,
+    )
+
+    private val RAW_REQUEST_KEY = Regex("^(\\s*)request:\\s*\\|[-+]?\\s*(?:#.*)?$")
+
+    /**
+     * YamlParser 是安全子集解析器，不支持多行标量，而且会丢掉空行；原始 HTTP 会话
+     * 恰好依赖头/体之间的空行。这里在进 YAML 解析器之前，把 request: | 的整段内容
+     * 原样抽出，替换成占位字符串，解析完成后再还原。只处理 request 这个键，不扩大
+     * YAML 的攻击面。
+     */
+    private fun extractRawRequestBlocks(text: String): ExtractedRawBlocks {
+        val lines = text.split('\n')
+        val out = ArrayList<String>(lines.size)
+        val blocks = LinkedHashMap<String, String>()
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            val match = RAW_REQUEST_KEY.matchEntire(line)
+            if (match == null) {
+                out.add(line)
+                i++
+                continue
+            }
+            val keyIndent = match.groupValues[1].length
+            val token = "__LUMINA_RAW_REQUEST_${blocks.size}__"
+            out.add(match.groupValues[1] + "request: \"" + token + "\"")
+            i++
+            val captured = ArrayList<String>()
+            while (i < lines.size) {
+                val bodyLine = lines[i]
+                if (bodyLine.isBlank()) {
+                    captured.add("")
+                    i++
+                    continue
+                }
+                val indent = bodyLine.indexOfFirst { it != ' ' }
+                if (indent <= keyIndent) break
+                captured.add(bodyLine)
+                i++
+            }
+            val nonBlank = captured.filter { it.isNotBlank() }
+            val minIndent = nonBlank.minOfOrNull { it.indexOfFirst { ch -> ch != ' ' } } ?: keyIndent + 2
+            val raw = captured.joinToString("\n") { bodyLine ->
+                if (bodyLine.isBlank()) "" else bodyLine.drop(minIndent.coerceAtMost(bodyLine.length))
+            }
+            blocks[token] = raw
+        }
+        return ExtractedRawBlocks(out.joinToString("\n"), blocks)
+    }
+
+    private fun restoreRawRequestBlocks(value: Any?, blocks: Map<String, String>): Any? {
+        return when (value) {
+            is Map<*, *> -> value.entries.associate { (k, v) ->
+                k to restoreRawRequestBlocks(v, blocks)
+            }
+            is List<*> -> value.map { restoreRawRequestBlocks(it, blocks) }
+            is String -> blocks[value] ?: value
+            else -> value
+        }
     }
 
     // ---------------- 各段落读取 ----------------
@@ -246,19 +313,39 @@ object PluginLoader {
     private fun readCheck(section: Map<*, *>?, hosts: List<String>): CheckDef? {
         if (section == null) return null
         checkKeys(section, CHECK_KEYS, "check")
-        val method = (section.str("method", "check") ?: "GET").uppercase()
-        if (method !in METHODS) {
-            throw PluginParseException("check.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
+        val rawRequest = section.str("request", "check")
+        val extraHeaders = readHeaders(section["headers"], "check.headers")
+        val method: String
+        val url: String
+        val headers: Map<String, String>
+        val body: String?
+        if (rawRequest != null) {
+            if (section.containsKey("url") || section.containsKey("method")) {
+                throw PluginParseException("check 同时写了 request 和 url/method：原始会话块已经包含请求行，删掉重复字段")
+            }
+            val parsed = parseRawRequest(rawRequest, "check.request", hosts)
+            method = parsed.method
+            url = parsed.url
+            headers = mergeHeaderMaps(parsed.headers, extraHeaders)
+            body = parsed.body
+        } else {
+            method = (section.str("method", "check") ?: "GET").uppercase()
+            if (method !in METHODS) {
+                throw PluginParseException("check.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
+            }
+            url = section.str("url", "check")
+                ?: throw PluginParseException("check 缺少 url：请写 check: { url: \"http://<白名单主机>/...\" } 或 request: | 原始会话")
+            validateUrl(url, hosts, "check.url")
+            headers = extraHeaders
+            body = null
         }
-        val url = section.str("url", "check")
-            ?: throw PluginParseException("check 缺少 url：请写 check: { url: \"http://<白名单主机>/...\" }")
-        validateUrl(url, hosts, "check.url")
         return CheckDef(
             method,
             url,
             readSimpleMatch(section, "online_when"),
             readSimpleMatch(section, "offline_when"),
-            readHeaders(section["headers"], "check.headers"),
+            headers,
+            body,
         )
     }
 
@@ -294,12 +381,31 @@ object PluginLoader {
             val m = item as? Map<*, *>
                 ?: throw PluginParseException("$where 必须是键值映射（- name: pwd / url: ...），当前是${typeName(item)}")
             checkKeys(m, STEP_KEYS, where)
-            val url = m.str("url", where)
-                ?: throw PluginParseException("$where 缺少 url：每一步都要写完整请求地址")
-            validateUrl(url, hosts, "$where.url")
-            val method = (m.str("method", where) ?: "GET").uppercase()
-            if (method !in METHODS) {
-                throw PluginParseException("$where.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
+            val rawRequest = m.str("request", where)
+            val extraHeaders = readHeaders(m["headers"], "$where.headers")
+            val method: String
+            val url: String
+            val headers: Map<String, String>
+            val body: String?
+            if (rawRequest != null) {
+                if (m.containsKey("url") || m.containsKey("method")) {
+                    throw PluginParseException("$where 同时写了 request 和 url/method：原始会话块已经包含请求行，删掉重复字段")
+                }
+                val parsed = parseRawRequest(rawRequest, "$where.request", hosts)
+                method = parsed.method
+                url = parsed.url
+                headers = mergeHeaderMaps(parsed.headers, extraHeaders)
+                body = parsed.body
+            } else {
+                url = m.str("url", where)
+                    ?: throw PluginParseException("$where 缺少 url：每一步都要写完整请求地址，或用 request: | 写原始会话")
+                validateUrl(url, hosts, "$where.url")
+                method = (m.str("method", where) ?: "GET").uppercase()
+                if (method !in METHODS) {
+                    throw PluginParseException("$where.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
+                }
+                headers = extraHeaders
+                body = null
             }
             val stepName = m.str("name", where) ?: "step$index"
             if (!seenNames.add(stepName)) {
@@ -315,7 +421,8 @@ object PluginLoader {
                     ?.let { readMatch(it, "$where.already_online_when") },
                 captures = readCaptures(m["capture"], where),
                 failMessageJsonPath = readFail(m, where),
-                headers = readHeaders(m["headers"], "$where.headers"),
+                headers = headers,
+                body = body,
             )
         }
     }
@@ -345,6 +452,87 @@ object PluginLoader {
             throw PluginParseException("$where 没有有效条件：contains / regex / json 至少要写一个非空值")
         }
         return def
+    }
+
+    private data class ParsedRawRequest(
+        val method: String,
+        val url: String,
+        val headers: Map<String, String>,
+        val body: String?,
+    )
+
+    private val RAW_REQUEST_LINE = Regex("^([A-Z]+)\\s+(\\S+)\\s+HTTP/1\\.([01])$")
+
+    /**
+     * 把抓包里的原始 HTTP 请求块拆成运行时字段：
+     *   GET /path?query HTTP/1.1
+     *   Host: host:port
+     *   Header: value
+     *
+     *   body
+     * Host 用来补全相对路径的 scheme + authority；请求行也可以是绝对 URL。
+     * Host / Content-Length 不进入 headers（由传输层按实际值重写），其余头原样保留。
+     */
+    private fun parseRawRequest(raw: String, where: String, hosts: List<String>): ParsedRawRequest {
+        val normalized = raw.replace("\r\n", "\n").replace('\r', '\n')
+        val blank = normalized.indexOf("\n\n")
+        val head = if (blank >= 0) normalized.substring(0, blank) else normalized
+        val body = if (blank >= 0) normalized.substring(blank + 2) else null
+        val lines = head.split('\n')
+        val requestLine = lines.firstOrNull()?.trim().orEmpty()
+        val match = RAW_REQUEST_LINE.matchEntire(requestLine)
+            ?: throw PluginParseException(
+                "$where 第一行必须是 \"GET /path HTTP/1.1\" 或 \"POST /path HTTP/1.1\"，当前是 \"$requestLine\"",
+            )
+        val method = match.groupValues[1].uppercase()
+        if (method !in METHODS) {
+            throw PluginParseException("$where 请求行的方法 \"$method\" 不支持：只能是 GET 或 POST")
+        }
+        val target = match.groupValues[2]
+        var hostHeader: String? = null
+        val headers = LinkedHashMap<String, String>()
+        lines.drop(1).forEachIndexed { index, line ->
+            if (line.isBlank()) return@forEachIndexed
+            val colon = line.indexOf(':')
+            if (colon <= 0) {
+                throw PluginParseException("$where 第 ${index + 2} 行不是合法请求头：\"$line\"")
+            }
+            val name = line.substring(0, colon).trim()
+            val value = line.substring(colon + 1).trim()
+            if (name.isEmpty()) throw PluginParseException("$where 第 ${index + 2} 行请求头名为空")
+            if (value.isEmpty()) throw PluginParseException("$where 请求头 $name 是空值")
+            when {
+                name.equals("Host", true) -> hostHeader = value
+                name.equals("Content-Length", true) -> Unit
+                else -> {
+                    val existing = headers.keys.firstOrNull { it.equals(name, true) }
+                    if (existing != null) headers.remove(existing)
+                    headers[name] = value
+                }
+            }
+        }
+        val url = if (target.startsWith("http://", true) || target.startsWith("https://", true)) {
+            target
+        } else {
+            val host = hostHeader
+                ?: throw PluginParseException("$where 缺少 Host 请求头：相对路径无法补全认证地址")
+            "http://" + host + if (target.startsWith("/")) target else "/$target"
+        }
+        validateUrl(url, hosts, "$where.url")
+        val finalBody = if (method == "POST") body.orEmpty() else body
+        return ParsedRawRequest(method, url, headers, finalBody)
+    }
+
+    /** 原始会话头 + 显式 headers：同名忽略大小写，显式 headers 覆盖原始值。 */
+    private fun mergeHeaderMaps(base: Map<String, String>, extra: Map<String, String>): Map<String, String> {
+        if (extra.isEmpty()) return base
+        val out = LinkedHashMap(base)
+        extra.forEach { (k, v) ->
+            val existing = out.keys.firstOrNull { it.equals(k, true) }
+            if (existing != null) out.remove(existing)
+            out[k] = v
+        }
+        return out
     }
 
     private fun readCaptures(raw: Any?, where: String): List<CaptureDef> {

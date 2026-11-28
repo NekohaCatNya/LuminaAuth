@@ -195,7 +195,7 @@ object SandboxHttp {
         headers.forEach { (k, v) ->
             if (dropReferer && k.equals("Referer", true)) return@forEach
             if (k.equals("Host", true) || k.equals("Content-Length", true) ||
-                k.equals("Connection", true) || k.equals("Accept-Encoding", true)) return@forEach
+                k.equals("Connection", true)) return@forEach
             sb.append(k).append(": ").append(v).append("\r\n")
         }
         return sb.toString()

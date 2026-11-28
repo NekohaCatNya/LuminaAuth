@@ -1,19 +1,19 @@
 id: drcom-default
 name: DrCOM 默认校园网认证
-version: 4
-description: DrCOM ePortal web auth 默认插件（按真实抓包对齐；不含默认 SSID，网络名请在 App 设置里配置）
+version: 5
+description: DrCOM ePortal web auth 默认插件；check/login 直接使用抓包原始 HTTP 会话，请求头与网页端保持一致
 
 # 认证时序
 timing:
   ip_poll_ms: 250
   max_ip_wait_ms: 3000
   skip_network_ready_on_notify: true
-  connect_timeout_ms: 3000      # 内网 Portal，连不上就别等 8 秒
+  connect_timeout_ms: 3000
   read_timeout_ms: 3000
 
 # 通道策略
 network:
-  auth_over_wifi: true          # 认证/检测强制从 wlan0 出站（内网地址走蜂窝必超时）
+  auth_over_wifi: true
   bind_process: true
   promote_network: true
   root_set_default: true
@@ -23,13 +23,6 @@ network:
 detect:
   retry_count: 3
   retry_delay_ms: 3000
-
-# 全局请求头：check 与 login 共用，step 内同名声明可覆盖
-headers:
-  User-Agent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0"
-  Accept: "*/*"
-  Accept-Language: "zh-CN,zh;q=0.9"
-  Referer: "http://218.6.130.195:1333/"
 
 sandbox:
   hosts:
@@ -47,8 +40,15 @@ fields:
     required: true
 
 check:
-  method: GET
-  url: "http://218.6.130.195:1333/drcom/chkstatus?callback=dr1002&jsVersion=4.X&v=3328&lang=zh"
+  # 原始会话块：第一行请求行，Host 用来补全相对路径；其余请求头原样发送
+  request: |
+    GET /drcom/chkstatus?callback=dr1002&jsVersion=4.X&v=3328&lang=zh HTTP/1.1
+    Host: 218.6.130.195:1333
+    User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0
+    Accept: */*
+    Referer: http://218.6.130.195:1333/
+    Accept-Encoding: gzip, deflate
+    Accept-Language: zh-CN,zh;q=0.9
   online_when:
     contains: '"result":1'
   offline_when:
@@ -57,11 +57,15 @@ check:
 login:
   steps:
     - name: auth
-      method: GET
-      # 与抓包一致：user_account 不带 @运营商后缀；MAC 用当前 wlan0 真实值
-      url: "http://218.6.130.195:801/eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C1%2C${username}&user_password=${password}&wlan_user_ip=${ip}&wlan_user_ipv6=&wlan_user_mac=${mac}&wlan_ac_ip=218.89.190.11&wlan_ac_name=&jsVersion=4.1.3&terminal_type=2&lang=zh-cn&v=${rand}&lang=zh"
-      headers:
-        Referer: "http://218.6.130.195:1333/"
+      # 与浏览器网页端抓包逐行对齐；账号/IP/MAC/随机数仍由 App 运行时替换
+      request: |
+        GET /eportal/portal/login?callback=dr1003&login_method=1&user_account=%2C1%2C${username}&user_password=${password}&wlan_user_ip=${ip}&wlan_user_ipv6=&wlan_user_mac=${mac}&wlan_ac_ip=218.89.190.11&wlan_ac_name=&jsVersion=4.1.3&terminal_type=2&lang=zh-cn&v=${rand}&lang=zh HTTP/1.1
+        Host: 218.6.130.195:801
+        User-Agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36 EdgA/157.0.0.0
+        Accept: */*
+        Referer: http://218.6.130.195:1333/
+        Accept-Encoding: gzip, deflate
+        Accept-Language: zh-CN,zh;q=0.9
       success_when:
         json:
           path: result

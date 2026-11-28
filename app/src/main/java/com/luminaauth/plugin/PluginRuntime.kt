@@ -35,8 +35,13 @@ object PluginRuntime {
                 LogBuffer.addDetail("PLUGIN", "template unresolved key=$key")
             }
             LogBuffer.addDetail("PLUGIN", "check step=begin method=${def.method} host=${hostOf(url)}")
+            val body = def.body?.let { template ->
+                PluginRules.expand(template, { state.resolve(it) }) { key ->
+                    LogBuffer.addDetail("PLUGIN", "body template unresolved key=$key")
+                }
+            }
             val resp = SandboxHttp.execute(
-                state.plugin, def.method, url,
+                state.plugin, def.method, url, body = body,
                 connectTimeoutMs = state.plugin.timing.connectTimeoutMs,
                 readTimeoutMs = state.plugin.timing.readTimeoutMs,
                 headers = expandHeaders(mergeHeaders(state.plugin.headers, def.headers), state),
@@ -110,8 +115,13 @@ object PluginRuntime {
                     "PLUGIN",
                     "login step=${step.name} begin method=${step.method} host=${hostOf(url)}",
                 )
+                val body = step.body?.let { template ->
+                    PluginRules.expand(template, { state.resolve(it) }) { key ->
+                        LogBuffer.addDetail("PLUGIN", "body template unresolved key=$key")
+                    }
+                }
                 val resp = SandboxHttp.execute(
-                    plugin, step.method, url,
+                    plugin, step.method, url, body = body,
                     connectTimeoutMs = plugin.timing.connectTimeoutMs,
                     readTimeoutMs = plugin.timing.readTimeoutMs,
                     headers = expandHeaders(mergeHeaders(plugin.headers, step.headers), state),

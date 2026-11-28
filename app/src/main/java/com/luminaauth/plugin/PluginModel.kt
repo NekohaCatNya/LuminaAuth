@@ -97,6 +97,8 @@ data class CheckDef(
     val onlineContains: String?,
     val offlineContains: String?,
     val headers: Map<String, String> = emptyMap(),
+    /** 原始 request 块里的请求体（GET 通常为空）。 */
+    val body: String? = null,
 )
 
 data class StepDef(
@@ -109,6 +111,8 @@ data class StepDef(
     val captures: List<CaptureDef>,
     val failMessageJsonPath: String?,
     val headers: Map<String, String> = emptyMap(),
+    /** 原始 request 块里的请求体；POST 表单直接写在这里。 */
+    val body: String? = null,
 )
 
 data class MatchDef(
