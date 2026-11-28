@@ -4,8 +4,8 @@
 
 插件引擎（YAML 解析、字段/键名校验、host 白名单、原始 `request: |` 拆分、模板展开、check/login 状态机、gzip 响应匹配）已整体迁移到 **C++ (`app/src/main/cpp/plugin_engine.cpp`)**；Kotlin 侧 `PluginLoader` / `PluginRuntime` 只保留 JNI 映射薄层。Compose UI 与 Android 系统组件（前台服务 `AutoLoginService`）按平台约束保留 Kotlin。
 
-- 包名 `com.luminaauth` · minSdk 29 / targetSdk 35 / compileSdk 37（以 `app/build.gradle.kts` 为准）
-- 当前版本 **vc261 / 1.1.6**，固定 release 证书，支持直接覆盖升级
+- 包名 `com.luminaauth` · minSdk 29 / compileSdk 37（以 `app/build.gradle.kts` 为准）
+- 当前版本 **vc262 / 1.1.6**，固定 release 证书，支持直接覆盖升级
 - UI：Jetpack Compose + miuix-kmp + 液态玻璃（Dock 参考 HyperIsland）
 
 ## 功能
@@ -24,7 +24,7 @@
 
 ## 安装与首次使用
 
-1. 安装 `LuminaAuth-1.1.6-vc261-<abi>.apk`（不确定架构就装 `universal`）。
+1. 安装 `LuminaAuth-1.1.6-vc262-<abi>.apk`（不确定架构就装 `universal`）。
 2. 打开 App，授予定位（读 WiFi 名）、通知、电池优化等权限。
 3. 到「设置 → 高级设置 → 插件 → 导入插件」导入 `drcom-default.plugin.yaml`，点选为「使用中」。
 4. 在设置里填写校园网 WiFi 名称（多个用逗号分隔），然后打开「自动认证」。

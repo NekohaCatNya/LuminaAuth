@@ -16,7 +16,7 @@ android {
         minSdk = 29
         multiDexEnabled = true
         targetSdk = targetSdkVersion
-        versionCode = 261
+        versionCode = 262
         versionName = "1.1.6"
         buildConfigField("int", "COMPILE_SDK", compileSdkVersion.toString())
 
