@@ -25,16 +25,23 @@ class AboutActivity : ComponentActivity() {
                 ) {
                 CompositionLocalProvider(LocalEnableBlur provides true) {
                     val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+                    val appInfo = packageManager.getApplicationInfo(packageName, 0)
                     val realVersionCode = pkgInfo.longVersionCode
                     val realVersionName = pkgInfo.versionName
+                    val minSdk = appInfo.minSdkVersion
+                    val targetSdk = appInfo.targetSdkVersion
+                    val compileSdk = BuildConfig.COMPILE_SDK
+                    val runtimeSdk = android.os.Build.VERSION.SDK_INT
                     val state = AboutUiState(
                         title = "关于应用",
                         appName = "LuminaAuth",
                         versionName = "v$realVersionName · VersionCode $realVersionCode",
                         infoItems = listOf(
                             InfoItem("版本", "v$realVersionName (vc$realVersionCode)"),
-                            InfoItem("最低系统", "Android 10 (API 29)"),
-                            InfoItem("编译 SDK", "Android 16 (API 36)"),
+                            InfoItem("最低 API", "API $minSdk"),
+                            InfoItem("目标 API", "API $targetSdk"),
+                            InfoItem("编译 API", "API $compileSdk"),
+                            InfoItem("当前系统", "API $runtimeSdk"),
                             InfoItem("技术栈", "Compose + Miuix"),
                             InfoItem("提权方式", "Root / Shizuku"),
                             InfoItem("开源协议", "GPL-3.0-or-later"),

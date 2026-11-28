@@ -54,7 +54,6 @@ import java.io.File
 import com.luminaauth.plugin.PluginLoader
 import com.luminaauth.plugin.PluginManager
 import com.luminaauth.plugin.PluginParseException
-import com.luminaauth.plugin.cleanHiddenChars
 import com.luminaauth.plugin.PluginRuntime
 import com.luminaauth.plugin.PluginSource
 import top.yukonga.miuix.kmp.basic.Card
@@ -441,12 +440,16 @@ private fun PluginManagerCard(onError: (String) -> Unit) {
                 onError("文件读取失败：无法从所选文件读到任何内容")
                 return@rememberLauncherForActivityResult
             }
-            // 与 PluginLoader 内部使用完全相同的清洗，保证落盘副本 == 通过校验的文本
-            val yamlText = cleanHiddenChars(rawYaml)
+            // 隐藏字符清洗与 YAML 校验都在 C++ 插件引擎内完成；这里落盘原始文本。
+            val yamlText = rawYaml
             val plugin = PluginLoader.load(yamlText, "imported.plugin.yaml", PluginSource.EXTERNAL)
             val pluginDir = PluginManager.pluginDir(AppContext.get())
             if (!pluginDir.exists()) pluginDir.mkdirs()
-            val outFile = File(pluginDir, "${plugin.id}.plugin.yaml")
+            // 插件 id 只作为文件名的一部分，过滤路径分隔符，避免导入时写出插件目录。
+            val safeId = plugin.id.map { ch ->
+                if (ch.isLetterOrDigit() || ch == '.' || ch == '_' || ch == '-') ch else '_'
+            }.joinToString("").trim('.').ifEmpty { "imported" }
+            val outFile = File(pluginDir, "$safeId.plugin.yaml")
             outFile.writeText(yamlText)
             PluginManager.reload(AppContext.get())
             Toast.makeText(AppContext.get(), "插件导入成功", Toast.LENGTH_SHORT).show()
@@ -456,7 +459,7 @@ private fun PluginManagerCard(onError: (String) -> Unit) {
             onError("插件解析失败：${e.message}")
         } catch (e: Exception) {
             e.printStackTrace()
-            onError("插件解析失败：${e.message}\n（已自动清理隐藏字符，若仍报错，请检查缩进）")
+            onError("插件解析失败：${e.message}\n（隐藏字符由原生引擎清理；若仍报错，请检查缩进与键名）")
         }
     }
 

@@ -1,9 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
 project(lumina-native)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 add_library(lumina-native SHARED
     native_bridge.cpp
     native_http.cpp
+    plugin_engine.cpp
     log_ring_buffer.cpp
     fast_json.cpp
 )

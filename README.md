@@ -2,8 +2,10 @@
 
 校园网自动登录 Android 应用。连上目标校园网 WiFi 后自动完成 Portal 认证（DrCOM / 锐捷 / 深澜 / H3C 等），不用每次手动开浏览器输账号密码。认证差异全部由 **外置 YAML 插件** 描述，插件是纯数据，不含可执行代码。
 
-- 包名 `com.luminaauth` · minSdk 29 / targetSdk 36 / compileSdk 37
-- 当前版本 **vc259 / 1.1.6**，固定 release 证书，支持直接覆盖升级
+插件引擎（YAML 解析、字段/键名校验、host 白名单、原始 `request: |` 拆分、模板展开、check/login 状态机、gzip 响应匹配）已整体迁移到 **C++ (`app/src/main/cpp/plugin_engine.cpp`)**；Kotlin 侧 `PluginLoader` / `PluginRuntime` 只保留 JNI 映射薄层。Compose UI 与 Android 系统组件（前台服务 `AutoLoginService`）按平台约束保留 Kotlin。
+
+- 包名 `com.luminaauth` · minSdk 29 / targetSdk 35 / compileSdk 37（以 `app/build.gradle.kts` 为准）
+- 当前版本 **vc261 / 1.1.6**，固定 release 证书，支持直接覆盖升级
 - UI：Jetpack Compose + miuix-kmp + 液态玻璃（Dock 参考 HyperIsland）
 
 ## 功能
@@ -22,7 +24,7 @@
 
 ## 安装与首次使用
 
-1. 安装 `LuminaAuth-1.1.6-vc259-<abi>.apk`（不确定架构就装 `universal`）。
+1. 安装 `LuminaAuth-1.1.6-vc261-<abi>.apk`（不确定架构就装 `universal`）。
 2. 打开 App，授予定位（读 WiFi 名）、通知、电池优化等权限。
 3. 到「设置 → 高级设置 → 插件 → 导入插件」导入 `drcom-default.plugin.yaml`，点选为「使用中」。
 4. 在设置里填写校园网 WiFi 名称（多个用逗号分隔），然后打开「自动认证」。
@@ -44,22 +46,35 @@ timing:
   skip_network_ready_on_notify: true
 
 network:
-  ssid: [ChinaNet-JLZG, JLZG-5G]
+  ssid:
+    - ChinaNet-JLZG
+    - JLZG-5G
   bind_process: true
   promote_network: true
   root_set_default: true
-  preferred_ifaces: [wlan0, rmnet, eth0]
+  preferred_ifaces:
+    - wlan0
+    - rmnet
+    - eth0
 
 detect:
   retry_count: 3
   retry_delay_ms: 3000
 
 sandbox:
-  hosts: [218.6.130.195:801, 218.6.130.195:1333]
+  hosts:
+    - 218.6.130.195:801
+    - 218.6.130.195:1333
 
 fields:
-  - { id: username, name: 用户名, type: text, required: true }
-  - { id: password, name: 密码, type: password, required: true }
+  - id: username
+    name: 用户名
+    type: text
+    required: true
+  - id: password
+    name: 密码
+    type: password
+    required: true
 
 check:
   request: |
@@ -70,8 +85,10 @@ check:
     Referer: http://218.6.130.195:1333/
     Accept-Encoding: gzip, deflate
     Accept-Language: zh-CN,zh;q=0.9
-  online_when:  { contains: '"result":1' }
-  offline_when: { contains: '"result":0' }
+  online_when:
+    contains: '"result":1'
+  offline_when:
+    contains: '"result":0'
 
 login:
   steps:
@@ -84,9 +101,14 @@ login:
         Referer: http://218.6.130.195:1333/
         Accept-Encoding: gzip, deflate
         Accept-Language: zh-CN,zh;q=0.9
-      success_when: { json: { path: result, equals: "1" } }
-      already_online_when: { contains: "已经在线" }
-      fail: { json_path: msg }
+      success_when:
+        json:
+          path: result
+          equals: "1"
+      already_online_when:
+        contains: "已经在线"
+      fail:
+        json_path: msg
 ```
 
 字段规则：
@@ -94,7 +116,8 @@ login:
 - `timing` / `detect` 可整段省略，缺省值等价旧行为；`network` 里除 `ssid` 外的策略键也都可选。
 - `ssid` 为空或整段删掉 = 不按网络名匹配，不会误触发任何 WiFi。
 - `login.steps` 至少一步；模板变量 `${username}` `${password}` `${isp}` `${ip}` `${rand}`，以及 `capture` 捕获出的变量。
-- `success_when` 支持 `contains` / `regex` / `json: {path, equals}`；未知键会报错并指出具体键名。
+- `success_when` 支持 `contains` / `regex` / `json.path` + `json.equals`；未知键会报错并指出具体键名。
+- YAML 只支持块格式（缩进列表/映射）；`[...]` 简单列表为兼容旧插件保留，`{...}` flow 映射不支持，请按上面的块写法。
 
 ## 网络通道说明
 
@@ -117,7 +140,7 @@ ANDROID_HOME=/path/to/android-sdk \
 
 - R8 开启（`isMinifyEnabled` / `isShrinkResources`），keep 规则见 `app/proguard-rules.pro` 与 `R8-类名映射.md`；
 - 4GB 内存机器请保持 `gradle.properties` 的 `-Xmx1792m`、`android.enableR8.fullMode=false`，否则 R8 阶段会被 OOM 杀掉；
-- 签名：`schoolautologin-release.keystore`（alias `schoolautologin`），`v1 + v2`，v3-only 在 MIUI 会报安装失败 (33)；
+- 签名：仓库不包含 `keystore` 或口令；构建时通过 `LUMINA_KEYSTORE_PATH`、`LUMINA_STORE_PASSWORD`、`LUMINA_KEY_PASSWORD` 注入本地签名材料，alias 为 `schoolautologin`，`v1 + v2`，v3-only 在 MIUI 会报安装失败 (33)；
 - 离线依赖：`libs-maven/`（Compose 1.13 等），联网构建可忽略。
 
 ## 日志与排错

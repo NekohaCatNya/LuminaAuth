@@ -3,18 +3,22 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val compileSdkVersion = 37
+val targetSdkVersion = 35
+
 android {
     namespace = "com.luminaauth"
-    compileSdk = 37
+    compileSdk = compileSdkVersion
     ndkVersion = "25.2.9519653"
 
     defaultConfig {
         applicationId = "com.luminaauth"
         minSdk = 29
         multiDexEnabled = true
-        targetSdk = 36
-        versionCode = 259
+        targetSdk = targetSdkVersion
+        versionCode = 261
         versionName = "1.1.6"
+        buildConfigField("int", "COMPILE_SDK", compileSdkVersion.toString())
 
         externalNativeBuild {
             cmake {
@@ -42,10 +46,11 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../schoolautologin-release.keystore")
-            storePassword = "schoolautologin123"
+            // 签名文件与口令只保留在本地/CI Secret，仓库不提交任何密钥材料
+            storeFile = file(System.getenv("LUMINA_KEYSTORE_PATH") ?: "../schoolautologin-release.keystore")
+            storePassword = System.getenv("LUMINA_STORE_PASSWORD").orEmpty()
             keyAlias = "schoolautologin"
-            keyPassword = "schoolautologin123"
+            keyPassword = System.getenv("LUMINA_KEY_PASSWORD").orEmpty()
             // v3-only 会被部分 MIUI 安装器判为“解析软件包时出现问题(33)”，强制走 v2
             enableV1Signing = true
             enableV2Signing = true
@@ -79,6 +84,7 @@ android {
     buildFeatures {
         compose = true
         aidl = true
+        buildConfig = true
     }
 
     lint {

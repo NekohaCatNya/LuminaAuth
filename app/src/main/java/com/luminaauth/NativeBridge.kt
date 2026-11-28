@@ -28,6 +28,11 @@ object NativeBridge {
     @JvmStatic external fun nativeHttpRequest(
         method: String, url: String, body: String?, referer: String?, headers: String?, timeoutMs: Int
     ): String
+
+    /** 插件体系：YAML 解析/校验在 C++，返回描述 JSON。 */
+    @JvmStatic external fun nativePluginLoad(yaml: String, fileName: String, source: String): String
+    @JvmStatic external fun nativePluginCheck(pluginId: String, stateJson: String): String
+    @JvmStatic external fun nativePluginLogin(pluginId: String, stateJson: String): String
     @JvmStatic external fun nativeTcpPing(host: String, port: Int): Boolean
     @JvmStatic external fun nativeResolveHost(host: String): String
     @JvmStatic external fun nativeSetBindIface(iface: String): Unit

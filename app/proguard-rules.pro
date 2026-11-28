@@ -1,3 +1,7 @@
+# ---- JNI：native 方法名必须和 C++ 导出符号保持一一对应 ----
+-keepclasseswithmembernames class * { native <methods>; }
+-keep class com.luminaauth.NativeBridge { *; }
+
 # ---- 通用安全规则 ----
 -keepattributes Signature
 -keepattributes *Annotation*

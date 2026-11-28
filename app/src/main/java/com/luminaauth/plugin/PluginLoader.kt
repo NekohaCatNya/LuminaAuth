@@ -1,754 +1,148 @@
 package com.luminaauth.plugin
 
+import com.luminaauth.NativeBridge
+import org.json.JSONArray
+import org.json.JSONObject
+
 /**
- * 把 YAML 解析结果映射成经过校验的 [Plugin]。
- *
- * 校验原则：不静默丢弃任何条目。
- * 旧实现用 mapNotNull 过滤 hosts / isps / capture，键名写错、条目为空、
- * 类型不对都会被悄悄吃掉，最后统一报一句 requires at least one sandbox host，
- * 用户无法定位到底哪一行有问题。现在任何未知键、空条目、非法取值都会以
- * [PluginParseException] 中止加载，并在消息里写明"哪个键、第几项、为什么"。
+ * Kotlin 侧只做 JNI 边界：把 C++ 插件引擎返回的描述 JSON 映射成 UI 需要的数据类。
+ * YAML 解析、键名校验、沙盒主机校验、原始 request 拆分、check/login 执行全部在
+ * app/src/main/cpp/plugin_engine.cpp，Kotlin 不再保留第二套解析逻辑。
  */
 object PluginLoader {
 
-    /** 只取 scheme + authority；path/query 可能含 ${...} 模板，不能当 URL 解析。 */
-    private val URL_PREFIX = Regex("^(https?)://([^/?#]+)")
-
-    private val ROOT_KEYS = setOf(
-        "id", "name", "version", "description", "network",
-        "sandbox", "sandbox_hosts", "fields", "isps", "check", "login",
-        "timing", "detect", "headers",
-    )
-    private val NETWORK_KEYS = setOf(
-        "ssid", "bind_process", "promote_network", "root_set_default", "preferred_ifaces",
-        "auth_over_wifi",
-    )
-    private val TIMING_KEYS = setOf(
-        "ip_poll_ms", "max_ip_wait_ms", "skip_network_ready_on_notify",
-        "connect_timeout_ms", "read_timeout_ms",
-    )
-    private val DETECT_KEYS = setOf("retry_count", "retry_delay_ms")
-    private val SANDBOX_KEYS = setOf("hosts")
-    private val FIELD_KEYS = setOf("id", "name", "type", "required")
-    private val ISP_KEYS = setOf("id", "suffix", "name", "label", "default")
-    private val CHECK_KEYS = setOf("method", "url", "request", "online_when", "offline_when", "headers")
-    private val MATCH_KEYS = setOf("contains", "regex", "json", "json_path", "json_equals")
-    private val JSON_KEYS = setOf("path", "equals")
-    private val LOGIN_KEYS = setOf("steps")
-    private val STEP_KEYS = setOf(
-        "name", "method", "url", "request", "expect_status", "headers",
-        "success_when", "already_online_when", "capture", "fail",
-    )
-    private val CAPTURE_KEYS = setOf("name", "json_path", "regex", "group")
-    private val FAIL_KEYS = setOf("json_path")
-    private val METHODS = setOf("GET", "POST")
-
     fun load(text: String, fileName: String, source: PluginSource): Plugin {
-        val cleaned = cleanHiddenChars(text)
-        if (cleaned.isBlank()) {
-            throw PluginParseException("插件内容为空：文件里没有任何可解析的配置")
+        val raw = try {
+            NativeBridge.nativePluginLoad(text, fileName, source.name)
+        } catch (t: Throwable) {
+            throw PluginParseException("原生插件引擎不可用：${t.javaClass.simpleName}")
         }
-
-        val extracted = extractRawRequestBlocks(cleaned)
-        val parsed = try {
-            YamlParser.parse(extracted.text)
-        } catch (e: PluginParseException) {
-            throw e
-        } catch (e: IllegalArgumentException) {
-            throw PluginParseException("YAML 语法错误：${e.message}")
+        val result = try {
+            JSONObject(raw)
+        } catch (t: Throwable) {
+            throw PluginParseException("原生插件引擎返回了非法 JSON")
         }
+        if (!result.optBoolean("ok", false)) {
+            throw PluginParseException(result.optString("error", "插件解析失败"))
+        }
+        val p = result.optJSONObject("plugin")
+            ?: throw PluginParseException("原生插件引擎缺少 plugin 描述")
+        return mapPlugin(p, source, fileName)
+    }
 
-        val root = restoreRawRequestBlocks(parsed, extracted.blocks) as? Map<*, *>
-            ?: throw PluginParseException("插件根节点必须是 key: value 映射，当前是${typeName(parsed)}")
-        checkKeys(root, ROOT_KEYS, "顶层")
-
-        val id = root.str("id", "顶层")
-            ?: throw PluginParseException("缺少插件标识：顶层必须写 id: <唯一标识>")
-        val name = root.str("name", "顶层") ?: id
-        val version = root["version"]?.let { toInt(it, "顶层.version") } ?: 1
-        val description = root.str("description", "顶层") ?: ""
-
-        val network = root.section("network")
-        val ssidPatterns = readSsid(network)
-
-        val sandbox = root.section("sandbox")
-        val hostsPath = if (sandbox?.containsKey("hosts") == true) "sandbox.hosts" else "sandbox_hosts"
-        val hostEntries = readHosts(sandbox?.get("hosts") ?: root["sandbox_hosts"], hostsPath)
-        val hosts = hostEntries.map { it.authority }
-
-        val fields = readFields(root["fields"])
-        val isps = readIsps(root["isps"])
-        val check = readCheck(root.section("check"), hosts)
-
-        val login = root.section("login")
-            ?: throw PluginParseException("缺少 login 段：插件至少要写 login.steps 里的一个登录请求")
-        checkKeys(login, LOGIN_KEYS, "login")
-        val steps = readSteps(login["steps"], hosts)
-
-        val timing = readTiming(root.section("timing"))
-        val policy = readPolicy(network)
-        val detect = readDetect(root.section("detect"))
-
+    private fun mapPlugin(p: JSONObject, source: PluginSource, fileName: String): Plugin {
         return Plugin(
-            id = id,
-            name = name,
-            version = version,
-            description = description,
-            ssidPatterns = ssidPatterns,
-            hosts = hosts,
-            fields = fields,
-            isps = isps,
-            check = check,
-            loginSteps = steps,
+            id = p.optString("id"),
+            name = p.optString("name"),
+            version = p.optInt("version", 1),
+            description = p.optString("description"),
+            ssidPatterns = strings(p.optJSONArray("ssids")),
+            hosts = strings(p.optJSONArray("hosts")),
+            fields = objects(p.optJSONArray("fields")).map { o ->
+                FieldDef(
+                    id = o.optString("id"),
+                    label = o.optString("label"),
+                    type = if (o.optString("type") == "password") FieldType.PASSWORD else FieldType.TEXT,
+                    required = o.optBoolean("required", true),
+                )
+            },
+            isps = objects(p.optJSONArray("isps")).map { o ->
+                IspDef(
+                    id = o.optString("id"),
+                    label = o.optString("label"),
+                    default = o.optBoolean("default", false),
+                )
+            },
+            check = p.optJSONObject("check")?.let { o ->
+                CheckDef(
+                    method = o.optString("method", "GET"),
+                    url = o.optString("url"),
+                    onlineContains = o.stringOrNull("online"),
+                    offlineContains = o.stringOrNull("offline"),
+                    headers = headers(o.optJSONObject("headers")),
+                    body = o.stringOrNull("body"),
+                )
+            },
+            loginSteps = objects(p.optJSONArray("steps")).map { o ->
+                StepDef(
+                    name = o.optString("name"),
+                    method = o.optString("method", "GET"),
+                    url = o.optString("url"),
+                    expectStatus = if (o.isNull("expectStatus")) null else o.optInt("expectStatus"),
+                    success = match(o.optJSONObject("success")),
+                    alreadyOnline = match(o.optJSONObject("alreadyOnline")),
+                    captures = objects(o.optJSONArray("captures")).map { c ->
+                        CaptureDef(
+                            name = c.optString("name"),
+                            jsonPath = c.stringOrNull("jsonPath"),
+                            regex = c.stringOrNull("regex"),
+                            group = c.optInt("group", 1),
+                        )
+                    },
+                    failMessageJsonPath = o.stringOrNull("failJsonPath"),
+                    headers = headers(o.optJSONObject("headers")),
+                    body = o.stringOrNull("body"),
+                )
+            },
             source = source,
             fileName = fileName,
-            headers = readHeaders(root["headers"], "顶层.headers"),
-            timing = timing,
-            policy = policy,
-            detect = detect,
-        )
-    }
-
-    // ---------------- 原始 HTTP 会话块 ----------------
-
-    private data class ExtractedRawBlocks(
-        val text: String,
-        val blocks: Map<String, String>,
-    )
-
-    private val RAW_REQUEST_KEY = Regex("^(\\s*)request:\\s*\\|[-+]?\\s*(?:#.*)?$")
-
-    /**
-     * YamlParser 是安全子集解析器，不支持多行标量，而且会丢掉空行；原始 HTTP 会话
-     * 恰好依赖头/体之间的空行。这里在进 YAML 解析器之前，把 request: | 的整段内容
-     * 原样抽出，替换成占位字符串，解析完成后再还原。只处理 request 这个键，不扩大
-     * YAML 的攻击面。
-     */
-    private fun extractRawRequestBlocks(text: String): ExtractedRawBlocks {
-        val lines = text.split('\n')
-        val out = ArrayList<String>(lines.size)
-        val blocks = LinkedHashMap<String, String>()
-        var i = 0
-        while (i < lines.size) {
-            val line = lines[i]
-            val match = RAW_REQUEST_KEY.matchEntire(line)
-            if (match == null) {
-                out.add(line)
-                i++
-                continue
-            }
-            val keyIndent = match.groupValues[1].length
-            val token = "__LUMINA_RAW_REQUEST_${blocks.size}__"
-            out.add(match.groupValues[1] + "request: \"" + token + "\"")
-            i++
-            val captured = ArrayList<String>()
-            while (i < lines.size) {
-                val bodyLine = lines[i]
-                if (bodyLine.isBlank()) {
-                    captured.add("")
-                    i++
-                    continue
-                }
-                val indent = bodyLine.indexOfFirst { it != ' ' }
-                if (indent <= keyIndent) break
-                captured.add(bodyLine)
-                i++
-            }
-            val nonBlank = captured.filter { it.isNotBlank() }
-            val minIndent = nonBlank.minOfOrNull { it.indexOfFirst { ch -> ch != ' ' } } ?: keyIndent + 2
-            val raw = captured.joinToString("\n") { bodyLine ->
-                if (bodyLine.isBlank()) "" else bodyLine.drop(minIndent.coerceAtMost(bodyLine.length))
-            }
-            blocks[token] = raw
-        }
-        return ExtractedRawBlocks(out.joinToString("\n"), blocks)
-    }
-
-    private fun restoreRawRequestBlocks(value: Any?, blocks: Map<String, String>): Any? {
-        return when (value) {
-            is Map<*, *> -> value.entries.associate { (k, v) ->
-                k to restoreRawRequestBlocks(v, blocks)
-            }
-            is List<*> -> value.map { restoreRawRequestBlocks(it, blocks) }
-            is String -> blocks[value] ?: value
-            else -> value
-        }
-    }
-
-    // ---------------- 各段落读取 ----------------
-
-    /**
-     * 沙盒白名单主机。两种键名都接受：sandbox.hosts（内置插件写法）
-     * 与顶层 sandbox_hosts（新写法）。解析交给 [SandboxHost]，条目非法即报错。
-     */
-    private fun readHosts(raw: Any?, path: String): List<SandboxHost> {
-        if (raw == null) {
-            throw PluginParseException(
-                "缺少沙盒主机白名单：请写 sandbox.hosts 或 sandbox_hosts，至少一条（例如 - 218.6.130.195:1333）。" +
-                    "插件只能访问白名单内的主机，这一项不能省。",
-            )
-        }
-        val list = raw as? List<*> ?: throw PluginParseException(
-            "$path 必须是数组（每行一个 - host），当前是${typeName(raw)}",
-        )
-        if (list.isEmpty()) {
-            throw PluginParseException("$path 不能为空数组！请至少填写一条沙盒主机 host")
-        }
-        val entries = list.mapIndexed { index, item -> SandboxHost.parse(item, path, index) }
-        val seen = HashSet<String>()
-        entries.forEachIndexed { index, entry ->
-            if (!seen.add(entry.authority)) {
-                throw PluginParseException("$path[$index] 的 \"${entry.authority}\" 与前面的条目重复")
-            }
-        }
-        return entries
-    }
-
-    private fun readSsid(network: Map<*, *>?): List<String> {
-        if (network == null) return emptyList()
-        checkKeys(network, NETWORK_KEYS, "network")
-        val raw = network["ssid"] ?: return emptyList()
-        val items: List<*> = when (raw) {
-            is List<*> -> raw
-            is Map<*, *> -> throw PluginParseException("network.ssid 必须是数组（- SSID），当前是键值映射")
-            else -> raw.toString().split(',')
-        }
-        if (items.isEmpty()) {
-            throw PluginParseException("network.ssid 不能为空：不需要限定 SSID 时请整段删掉 network")
-        }
-        return items.mapIndexed { index, item ->
-            val ssid = item?.toString()?.trim().orEmpty()
-            if (ssid.isEmpty()) {
-                throw PluginParseException("network.ssid[$index] 是空条目！请填写 SSID 或删除该行")
-            }
-            ssid
-        }
-    }
-
-    private fun readFields(raw: Any?): List<FieldDef> {
-        if (raw == null) return emptyList()
-        val list = raw as? List<*> ?: throw PluginParseException(
-            "fields 必须是数组（- id: username / name: 用户名 / type: text），当前是${typeName(raw)}",
-        )
-        val seen = HashSet<String>()
-        return list.mapIndexed { index, item ->
-            val where = "fields[$index]"
-            val m = item as? Map<*, *> ?: throw PluginParseException("$where 必须是键值映射，当前是${typeName(item)}")
-            checkKeys(m, FIELD_KEYS, where)
-            val fid = m.str("id", where)
-                ?: throw PluginParseException("$where 缺少 id：密码框必须写成 - id: password 且 type: password")
-            if (!seen.add(fid)) {
-                throw PluginParseException("$where 的 id \"$fid\" 与前面的条目重复")
-            }
-            val typeRaw = (m.str("type", where) ?: "text").lowercase()
-            val type = when (typeRaw) {
-                "text" -> FieldType.TEXT
-                "password" -> FieldType.PASSWORD
-                else -> throw PluginParseException(
-                    "$where（id=$fid）的 type \"$typeRaw\" 不支持：只能是 text 或 password。" +
-                        "密码框写成 text 会把密码明文显示出来。",
+            headers = headers(p.optJSONObject("headers")),
+            timing = p.optJSONObject("timing")?.let { o ->
+                TimingDef(
+                    ipPollMs = o.optLong("ipPollMs", 250L),
+                    maxIpWaitMs = o.optLong("maxIpWaitMs", 3000L),
+                    skipNetworkReadyOnNotify = o.optBoolean("skipNetworkReadyOnNotify", true),
+                    connectTimeoutMs = o.optInt("connectTimeoutMs", 6000),
+                    readTimeoutMs = o.optInt("readTimeoutMs", 6000),
                 )
-            }
-            FieldDef(fid, m.str("name", where) ?: fid, type, readRequired(m, where, fid))
-        }
-    }
-
-    private fun readRequired(m: Map<*, *>, where: String, fid: String): Boolean {
-        if (!m.containsKey("required")) return true
-        return when (val v = m["required"]) {
-            null -> true
-            is Boolean -> v
-            else -> when (v.toString().trim().lowercase()) {
-                "true", "yes", "1" -> true
-                "false", "no", "0" -> false
-                else -> throw PluginParseException(
-                    "$where（id=$fid）的 required \"$v\" 不是布尔值：只能是 true 或 false",
+            } ?: TimingDef(),
+            policy = p.optJSONObject("policy")?.let { o ->
+                NetworkPolicyDef(
+                    bindProcess = o.optBoolean("bindProcess", true),
+                    promoteNetwork = o.optBoolean("promoteNetwork", true),
+                    rootSetDefault = o.optBoolean("rootSetDefault", true),
+                    preferredIfaces = strings(o.optJSONArray("preferredIfaces")),
+                    authOverWifi = o.optBoolean("authOverWifi", true),
                 )
-            }
-        }
-    }
-
-    /** isps 条目可选 default: true —— 标记分段 Dock 的预选项。 */
-    private fun readDefault(m: Map<*, *>, where: String): Boolean {
-        if (!m.containsKey("default")) return false
-        return when (val v = m["default"]) {
-            null -> false
-            is Boolean -> v
-            else -> when (v.toString().trim().lowercase()) {
-                "true", "yes", "1" -> true
-                "false", "no", "0" -> false
-                else -> throw PluginParseException(
-                    "$where 的 default \"$v\" 不是布尔值：只能是 true 或 false",
+            } ?: NetworkPolicyDef(),
+            detect = p.optJSONObject("detect")?.let { o ->
+                DetectDef(
+                    retryCount = o.optInt("retryCount", 3),
+                    retryDelayMs = o.optLong("retryDelayMs", 5000L),
                 )
-            }
-        }
-    }
-
-    private fun readIsps(raw: Any?): List<IspDef> {
-        if (raw == null) return emptyList()
-        val list = raw as? List<*> ?: throw PluginParseException(
-            "isps 必须是数组（- id: after / name: 教职工），当前是${typeName(raw)}",
-        )
-        if (list.isEmpty()) {
-            throw PluginParseException("isps 不能为空数组：不需要 ISP 选择时请整段删掉 isps")
-        }
-        val seen = HashSet<String>()
-        return list.mapIndexed { index, item ->
-            val where = "isps[$index]"
-            val m = item as? Map<*, *> ?: throw PluginParseException("$where 必须是键值映射，当前是${typeName(item)}")
-            checkKeys(m, ISP_KEYS, where)
-            val ispId = m.str("id", where) ?: m.str("suffix", where)
-                ?: throw PluginParseException("$where 缺少 id：请写 isps: - id: after / name: 教职工")
-            if (!seen.add(ispId)) {
-                throw PluginParseException("$where 的 id \"$ispId\" 与前面的条目重复")
-            }
-            IspDef(
-                ispId,
-                m.str("name", where) ?: m.str("label", where) ?: ispId,
-                readDefault(m, where),
-            )
-        }
-    }
-
-    private fun readCheck(section: Map<*, *>?, hosts: List<String>): CheckDef? {
-        if (section == null) return null
-        checkKeys(section, CHECK_KEYS, "check")
-        val rawRequest = section.str("request", "check")
-        val extraHeaders = readHeaders(section["headers"], "check.headers")
-        val method: String
-        val url: String
-        val headers: Map<String, String>
-        val body: String?
-        if (rawRequest != null) {
-            if (section.containsKey("url") || section.containsKey("method")) {
-                throw PluginParseException("check 同时写了 request 和 url/method：原始会话块已经包含请求行，删掉重复字段")
-            }
-            val parsed = parseRawRequest(rawRequest, "check.request", hosts)
-            method = parsed.method
-            url = parsed.url
-            headers = mergeHeaderMaps(parsed.headers, extraHeaders)
-            body = parsed.body
-        } else {
-            method = (section.str("method", "check") ?: "GET").uppercase()
-            if (method !in METHODS) {
-                throw PluginParseException("check.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
-            }
-            url = section.str("url", "check")
-                ?: throw PluginParseException("check 缺少 url：请写 check: { url: \"http://<白名单主机>/...\" } 或 request: | 原始会话")
-            validateUrl(url, hosts, "check.url")
-            headers = extraHeaders
-            body = null
-        }
-        return CheckDef(
-            method,
-            url,
-            readSimpleMatch(section, "online_when"),
-            readSimpleMatch(section, "offline_when"),
-            headers,
-            body,
+            } ?: DetectDef(),
         )
     }
 
-    /** check.online_when / offline_when 只支持 contains；其它写法以前会被静默忽略，现在直接报错。 */
-    private fun readSimpleMatch(section: Map<*, *>, key: String): String? {
-        if (!section.containsKey(key)) return null
-        val raw = section[key]
-            ?: throw PluginParseException("check.$key 是空的：请写 $key: { contains: \"...\" }")
-        val map = raw as? Map<*, *> ?: throw PluginParseException(
-            "check.$key 必须是映射，当前是${typeName(raw)}：\n请写成：\ncheck:\n  $key:\n    contains: \"...\"",
-        )
-        val unsupported = map.keys.map { it?.toString().orEmpty() }.filter { it != "contains" }
-        if (unsupported.isNotEmpty()) {
-            throw PluginParseException(
-                "check.$key 只支持 contains，不支持 ${unsupported.joinToString(", ")}（判断在线状态请匹配响应里的固定文本）",
-            )
-        }
-        return map.str("contains", "check.$key")
-            ?: throw PluginParseException("check.$key.contains 是空值：请填写响应中出现的固定文本")
-    }
-
-    private fun readSteps(raw: Any?, hosts: List<String>): List<StepDef> {
-        if (raw == null) {
-            throw PluginParseException("缺少 login.steps：\n请写成：\nlogin:\n  steps:\n    - url: http://<白名单主机>/...")
-        }
-        val list = raw as? List<*> ?: throw PluginParseException(
-            "login.steps 必须是数组（- name: ... / url: ...），当前是${typeName(raw)}",
-        )
-        if (list.isEmpty()) throw PluginParseException("login.steps 不能为空：至少要有一个登录请求")
-        val seenNames = HashSet<String>()
-        return list.mapIndexed { index, item ->
-            val where = "login.steps[$index]"
-            val m = item as? Map<*, *>
-                ?: throw PluginParseException("$where 必须是键值映射（- name: pwd / url: ...），当前是${typeName(item)}")
-            checkKeys(m, STEP_KEYS, where)
-            val rawRequest = m.str("request", where)
-            val extraHeaders = readHeaders(m["headers"], "$where.headers")
-            val method: String
-            val url: String
-            val headers: Map<String, String>
-            val body: String?
-            if (rawRequest != null) {
-                if (m.containsKey("url") || m.containsKey("method")) {
-                    throw PluginParseException("$where 同时写了 request 和 url/method：原始会话块已经包含请求行，删掉重复字段")
-                }
-                val parsed = parseRawRequest(rawRequest, "$where.request", hosts)
-                method = parsed.method
-                url = parsed.url
-                headers = mergeHeaderMaps(parsed.headers, extraHeaders)
-                body = parsed.body
-            } else {
-                url = m.str("url", where)
-                    ?: throw PluginParseException("$where 缺少 url：每一步都要写完整请求地址，或用 request: | 写原始会话")
-                validateUrl(url, hosts, "$where.url")
-                method = (m.str("method", where) ?: "GET").uppercase()
-                if (method !in METHODS) {
-                    throw PluginParseException("$where.method 的值 \"$method\" 不支持：只能是 GET 或 POST")
-                }
-                headers = extraHeaders
-                body = null
-            }
-            val stepName = m.str("name", where) ?: "step$index"
-            if (!seenNames.add(stepName)) {
-                throw PluginParseException("$where 的 name \"$stepName\" 与前面的步骤重复")
-            }
-            StepDef(
-                name = stepName,
-                method = method,
-                url = url,
-                expectStatus = m["expect_status"]?.let { toInt(it, "$where.expect_status") },
-                success = m.section("success_when", "$where.success_when")?.let { readMatch(it, "$where.success_when") },
-                alreadyOnline = m.section("already_online_when", "$where.already_online_when")
-                    ?.let { readMatch(it, "$where.already_online_when") },
-                captures = readCaptures(m["capture"], where),
-                failMessageJsonPath = readFail(m, where),
-                headers = headers,
-                body = body,
-            )
-        }
-    }
-
-    private fun readMatch(map: Map<*, *>, where: String): MatchDef {
-        checkKeys(map, MATCH_KEYS, where)
-        if (map.isEmpty()) {
-            throw PluginParseException("$where 是空的：请至少写一个条件（contains / regex / json）")
-        }
-        val json = map.section("json", "$where.json")
-        if (json != null) checkKeys(json, JSON_KEYS, "$where.json")
-        val regex = map.str("regex", where)
-        if (regex != null) {
-            try {
-                Regex(regex)
-            } catch (e: Exception) {
-                throw PluginParseException("$where.regex 正则表达式非法：$regex（${e.message}）")
-            }
-        }
-        val def = MatchDef(
-            bodyContains = map.str("contains", where),
-            bodyRegex = regex,
-            jsonPath = json?.str("path", "$where.json") ?: map.str("json_path", where),
-            jsonEquals = json?.str("equals", "$where.json") ?: map.str("json_equals", where),
-        )
-        if (def.bodyContains == null && def.bodyRegex == null && def.jsonPath == null && def.jsonEquals == null) {
-            throw PluginParseException("$where 没有有效条件：contains / regex / json 至少要写一个非空值")
-        }
-        return def
-    }
-
-    private data class ParsedRawRequest(
-        val method: String,
-        val url: String,
-        val headers: Map<String, String>,
-        val body: String?,
-    )
-
-    private val RAW_REQUEST_LINE = Regex("^([A-Z]+)\\s+(\\S+)\\s+HTTP/1\\.([01])$")
-
-    /**
-     * 把抓包里的原始 HTTP 请求块拆成运行时字段：
-     *   GET /path?query HTTP/1.1
-     *   Host: host:port
-     *   Header: value
-     *
-     *   body
-     * Host 用来补全相对路径的 scheme + authority；请求行也可以是绝对 URL。
-     * Host / Content-Length 不进入 headers（由传输层按实际值重写），其余头原样保留。
-     */
-    private fun parseRawRequest(raw: String, where: String, hosts: List<String>): ParsedRawRequest {
-        val normalized = raw.replace("\r\n", "\n").replace('\r', '\n')
-        val blank = normalized.indexOf("\n\n")
-        val head = if (blank >= 0) normalized.substring(0, blank) else normalized
-        val body = if (blank >= 0) normalized.substring(blank + 2) else null
-        val lines = head.split('\n')
-        val requestLine = lines.firstOrNull()?.trim().orEmpty()
-        val match = RAW_REQUEST_LINE.matchEntire(requestLine)
-            ?: throw PluginParseException(
-                "$where 第一行必须是 \"GET /path HTTP/1.1\" 或 \"POST /path HTTP/1.1\"，当前是 \"$requestLine\"",
-            )
-        val method = match.groupValues[1].uppercase()
-        if (method !in METHODS) {
-            throw PluginParseException("$where 请求行的方法 \"$method\" 不支持：只能是 GET 或 POST")
-        }
-        val target = match.groupValues[2]
-        var hostHeader: String? = null
-        val headers = LinkedHashMap<String, String>()
-        lines.drop(1).forEachIndexed { index, line ->
-            if (line.isBlank()) return@forEachIndexed
-            val colon = line.indexOf(':')
-            if (colon <= 0) {
-                throw PluginParseException("$where 第 ${index + 2} 行不是合法请求头：\"$line\"")
-            }
-            val name = line.substring(0, colon).trim()
-            val value = line.substring(colon + 1).trim()
-            if (name.isEmpty()) throw PluginParseException("$where 第 ${index + 2} 行请求头名为空")
-            if (value.isEmpty()) throw PluginParseException("$where 请求头 $name 是空值")
-            when {
-                name.equals("Host", true) -> hostHeader = value
-                name.equals("Content-Length", true) -> Unit
-                else -> {
-                    val existing = headers.keys.firstOrNull { it.equals(name, true) }
-                    if (existing != null) headers.remove(existing)
-                    headers[name] = value
-                }
-            }
-        }
-        val url = if (target.startsWith("http://", true) || target.startsWith("https://", true)) {
-            target
-        } else {
-            val host = hostHeader
-                ?: throw PluginParseException("$where 缺少 Host 请求头：相对路径无法补全认证地址")
-            "http://" + host + if (target.startsWith("/")) target else "/$target"
-        }
-        validateUrl(url, hosts, "$where.url")
-        val finalBody = if (method == "POST") body.orEmpty() else body
-        return ParsedRawRequest(method, url, headers, finalBody)
-    }
-
-    /** 原始会话头 + 显式 headers：同名忽略大小写，显式 headers 覆盖原始值。 */
-    private fun mergeHeaderMaps(base: Map<String, String>, extra: Map<String, String>): Map<String, String> {
-        if (extra.isEmpty()) return base
-        val out = LinkedHashMap(base)
-        extra.forEach { (k, v) ->
-            val existing = out.keys.firstOrNull { it.equals(k, true) }
-            if (existing != null) out.remove(existing)
-            out[k] = v
-        }
-        return out
-    }
-
-    private fun readCaptures(raw: Any?, where: String): List<CaptureDef> {
-        if (raw == null) return emptyList()
-        val list = raw as? List<*> ?: throw PluginParseException(
-            "$where.capture 必须是数组（- name: ip / regex: ...），当前是${typeName(raw)}",
-        )
-        val seen = HashSet<String>()
-        return list.mapIndexed { index, item ->
-            val path = "$where.capture[$index]"
-            val m = item as? Map<*, *>
-                ?: throw PluginParseException("$path 必须是键值映射（- name: ip / regex: ...），当前是${typeName(item)}")
-            checkKeys(m, CAPTURE_KEYS, path)
-            val cname = m.str("name", path)
-                ?: throw PluginParseException("$path 缺少 name：捕获到的变量要靠 name 传给后续步骤")
-            if (!seen.add(cname)) {
-                throw PluginParseException("$path 的 name \"$cname\" 与前面的捕获重复")
-            }
-            val regex = m.str("regex", path)
-            if (regex != null) {
-                try {
-                    Regex(regex)
-                } catch (e: Exception) {
-                    throw PluginParseException("$path.regex 正则表达式非法：$regex（${e.message}）")
-                }
-            }
-            val jsonPath = m.str("json_path", path)
-            if (regex == null && jsonPath == null) {
-                throw PluginParseException("$path 至少要写 regex 或 json_path 之一，否则捕获不到任何内容")
-            }
-            CaptureDef(cname, jsonPath, regex, m["group"]?.let { toInt(it, "$path.group") } ?: 1)
-        }
-    }
-
-    private fun readFail(m: Map<*, *>, where: String): String? {
-        if (!m.containsKey("fail")) return null
-        val raw = m["fail"] ?: throw PluginParseException("$where.fail 是空的：请写 fail: { json_path: msg }")
-        val map = raw as? Map<*, *> ?: throw PluginParseException(
-            "$where.fail 必须是映射，当前是${typeName(raw)}：\n请写成：\nfail:\n  json_path: msg",
-        )
-        checkKeys(map, FAIL_KEYS, "$where.fail")
-        return map.str("json_path", "$where.fail")
-            ?: throw PluginParseException("$where.fail.json_path 是空值：请填写失败信息在响应里的字段名")
-    }
-
-
-    // ---------------- 扩展段（缺省即默认值，旧插件无需改动） ----------------
-
-    private fun readTiming(section: Map<*, *>?): TimingDef {
-        if (section == null) return TimingDef()
-        checkKeys(section, TIMING_KEYS, "timing")
-        return TimingDef(
-            ipPollMs = section.longOr("ip_poll_ms", "timing", 250L).coerceIn(50L, 3000L),
-            maxIpWaitMs = section.longOr("max_ip_wait_ms", "timing", 3000L).coerceIn(0L, 30000L),
-            skipNetworkReadyOnNotify = section.boolOr("skip_network_ready_on_notify", "timing", true),
-            connectTimeoutMs = section.longOr("connect_timeout_ms", "timing", 6000L).toInt().coerceIn(500, 30000),
-            readTimeoutMs = section.longOr("read_timeout_ms", "timing", 6000L).toInt().coerceIn(500, 30000),
+    private fun match(o: JSONObject?): MatchDef? {
+        if (o == null) return null
+        return MatchDef(
+            bodyContains = o.stringOrNull("contains"),
+            bodyRegex = o.stringOrNull("regex"),
+            jsonPath = o.stringOrNull("jsonPath"),
+            jsonEquals = o.stringOrNull("jsonEquals"),
         )
     }
 
-    private fun readPolicy(network: Map<*, *>?): NetworkPolicyDef {
-        if (network == null) return NetworkPolicyDef()
-        return NetworkPolicyDef(
-            bindProcess = network.boolOr("bind_process", "network", true),
-            promoteNetwork = network.boolOr("promote_network", "network", true),
-            rootSetDefault = network.boolOr("root_set_default", "network", true),
-            preferredIfaces = readIfaces(network["preferred_ifaces"]),
-            authOverWifi = network.boolOr("auth_over_wifi", "network", true),
-        )
-    }
-
-    private fun readIfaces(raw: Any?): List<String> {
-        if (raw == null) return emptyList()
-        val items: List<*> = when (raw) {
-            is List<*> -> raw
-            is Map<*, *> -> throw PluginParseException("network.preferred_ifaces 必须是数组（- wlan0），当前是键值映射")
-            else -> raw.toString().split(',')
-        }
-        return items.mapNotNull { it?.toString()?.trim()?.ifEmpty { null } }
-    }
-
-    private fun readDetect(section: Map<*, *>?): DetectDef {
-        if (section == null) return DetectDef()
-        checkKeys(section, DETECT_KEYS, "detect")
-        return DetectDef(
-            retryCount = section.longOr("retry_count", "detect", 3L).toInt().coerceIn(1, 10),
-            retryDelayMs = section.longOr("retry_delay_ms", "detect", 5000L).coerceIn(200L, 60000L),
-        )
-    }
-
-    private fun Map<*, *>.longOr(key: String, where: String, def: Long): Long {
-        if (!containsKey(key)) return def
-        val v = this[key] ?: return def
-        return when (v) {
-            is Number -> v.toLong()
-            else -> v.toString().trim().toLongOrNull()
-                ?: throw PluginParseException("$where.$key 必须是整数，当前是 \"$v\"")
-        }
-    }
-
-    private fun Map<*, *>.boolOr(key: String, where: String, def: Boolean): Boolean {
-        if (!containsKey(key)) return def
-        return when (val v = this[key]) {
-            null -> def
-            is Boolean -> v
-            else -> when (v.toString().trim().lowercase()) {
-                "true", "yes", "1" -> true
-                "false", "no", "0" -> false
-                else -> throw PluginParseException("$where.$key 不是布尔值：只能是 true 或 false")
-            }
-        }
-    }
-
-
-    /** 请求头：只允许标量键值，名值都不能为空；值支持 ${...} 模板（按调用处展开）。 */
-    private fun readHeaders(raw: Any?, where: String): Map<String, String> {
-        if (raw == null) return emptyMap()
-        val map = raw as? Map<*, *> ?: throw PluginParseException(
-            "$where 必须是键值映射（Referer: \"http://...\"），当前是${typeName(raw)}",
-        )
+    private fun headers(o: JSONObject?): Map<String, String> {
+        if (o == null) return emptyMap()
         val out = LinkedHashMap<String, String>()
-        map.forEach { (k, v) ->
-            val name = k?.toString()?.trim().orEmpty()
-            if (name.isEmpty()) throw PluginParseException("$where 出现空请求头名")
-            if (v is Map<*, *> || v is List<*>) throw PluginParseException("$where.$name 必须是文本，当前是${typeName(v)}")
-            val value = v?.toString()?.trim().orEmpty()
-            if (value.isEmpty()) throw PluginParseException("$where.$name 是空值")
-            out[name] = value
-        }
+        o.keys().forEach { k -> out[k] = o.optString(k) }
         return out
     }
 
-    // ---------------- URL 白名单 ----------------
-
-    /**
-     * 声明的请求地址必须是绝对 http(s) 且命中白名单，只检查 scheme 与 host[:port]。
-     * path/query 允许含 ${...} 模板与任意字符，因此不整体解析。
-     */
-    private fun validateUrl(url: String, hosts: List<String>, where: String) {
-        val match = URL_PREFIX.find(url)
-            ?: throw PluginParseException("$where 必须是 http(s) 绝对地址，当前是 \"$url\"")
-        val scheme = match.groupValues[1].lowercase()
-        val authority = match.groupValues[2].substringAfterLast('@')
-        val colon = authority.lastIndexOf(':')
-        val host: String
-        val port: Int
-        if (colon >= 0 && authority.substring(colon + 1).toIntOrNull() != null) {
-            host = authority.substring(0, colon)
-            port = authority.substring(colon + 1).toInt()
-        } else {
-            host = authority
-            port = if (scheme == "https") 443 else 80
-        }
-        val hostLc = host.lowercase()
-        if (hostLc.isBlank()) throw PluginParseException("$where 里没有主机名：\"$url\"")
-        val allowed = hosts.any { entry ->
-            val ec = entry.indexOf(':')
-            if (ec < 0) {
-                entry == hostLc
-            } else {
-                entry.substring(0, ec) == hostLc &&
-                    (entry.substring(ec + 1).toIntOrNull() ?: -1) == port
-            }
-        }
-        if (!allowed) {
-            throw PluginParseException(
-                "$where 的主机 $hostLc:$port 不在沙盒白名单内。白名单：${hosts.joinToString(", ")}。" +
-                    "如需访问，请在 sandbox.hosts 里补一条，端口要与 url 完全一致。",
-            )
-        }
+    private fun strings(a: JSONArray?): List<String> {
+        if (a == null) return emptyList()
+        return (0 until a.length()).map { a.optString(it) }
     }
 
-    // ---------------- 基础工具 ----------------
-
-    /** 未知键一律报错：写错键名以前会被静默忽略，最后表现为"配置凭空少了"。 */
-    private fun checkKeys(map: Map<*, *>, allowed: Set<String>, where: String) {
-        map.keys.forEach { rawKey ->
-            val key = rawKey?.toString().orEmpty()
-            if (key.isEmpty()) throw PluginParseException("$where 出现空键：检查缩进与冒号写法")
-            if (key !in allowed) {
-                throw PluginParseException(
-                    "$where 出现未知键 \"$key\"${keyHint(key, allowed)}。可用键：${allowed.joinToString(", ")}",
-                )
-            }
-        }
+    private fun objects(a: JSONArray?): List<JSONObject> {
+        if (a == null) return emptyList()
+        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
     }
 
-    private fun Map<*, *>.section(key: String, path: String = key): Map<*, *>? {
-        if (!containsKey(key)) return null
-        val v = this[key] ?: return null
-        return v as? Map<*, *> ?: throw PluginParseException(
-            "$path 必须是键值映射，当前是${typeName(v)}（检查缩进：子键要比 $key 多缩进）",
-        )
-    }
-
-    private fun Map<*, *>.str(key: String, where: String): String? {
-        if (!containsKey(key)) return null
-        val v = this[key] ?: return null
-        if (v is Map<*, *> || v is List<*>) {
-            throw PluginParseException("$where.$key 应该是一段文本，当前是${typeName(v)}")
-        }
-        return v.toString().trim().ifEmpty { null }
-    }
-
-    private fun toInt(v: Any, where: String): Int = when (v) {
-        is Number -> v.toInt()
-        else -> v.toString().trim().toIntOrNull()
-            ?: throw PluginParseException("$where 必须是整数，当前是 \"$v\"")
-    }
-
-    private fun typeName(v: Any?): String = when (v) {
-        null -> "空值"
-        is Map<*, *> -> "键值映射"
-        is List<*> -> "数组"
-        is Boolean -> "布尔值"
-        is Number -> "数字"
-        else -> "字符串"
+    private fun JSONObject.stringOrNull(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        return optString(key).takeIf { it.isNotEmpty() }
     }
 }

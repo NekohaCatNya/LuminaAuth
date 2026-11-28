@@ -3,218 +3,77 @@ package com.luminaauth.plugin
 import android.content.Context
 import com.luminaauth.LogBuffer
 import com.luminaauth.LoginService
+import com.luminaauth.NativeBridge
+import org.json.JSONObject
 
 /**
- * Executes a plugin's check / login flow against a [SessionState].
- * All steps are data-driven; evaluation lives in [PluginRules] and every
- * request goes through [SandboxHttp]. Emits compact English machine logs.
+ * Kotlin 只负责把 SessionState 打包成 JNI 入参，再把 C++ 插件引擎的结果写回状态。
+ * check/login 的模板展开、HTTP、匹配、capture、失败原因都在 plugin_engine.cpp。
  */
 object PluginRuntime {
 
-    /** Populate runtime values (local IP) before a run. */
     fun prepare(context: Context, state: SessionState) {
-        if (state.ip == null) {
-            state.ip = LoginService.getLocalIPv4(context)
-        }
+        if (state.ip == null) state.ip = LoginService.getLocalIPv4(context)
     }
 
-    /** Custom auth address when set, otherwise the active plugin's login base. */
     fun getEffectiveLoginUrl(context: Context, customInputUrl: String): String =
         if (customInputUrl.isNotBlank()) customInputUrl
         else PluginManager.defaultLoginUrl(context)
 
-    fun check(state: SessionState): Outcome {
+    fun check(state: SessionState): Outcome = run(state, login = false)
+
+    fun login(state: SessionState): Outcome = run(state, login = true)
+
+    private fun run(state: SessionState, login: Boolean): Outcome {
         return try {
-            val def = state.plugin.check
-            if (def == null) {
-                state.reason = "no_check"
-                state.outcome = Outcome.ERROR
-                return Outcome.ERROR
+            val stateJson = stateJson(state)
+            val raw = if (login) {
+                NativeBridge.nativePluginLogin(state.plugin.id, stateJson)
+            } else {
+                NativeBridge.nativePluginCheck(state.plugin.id, stateJson)
             }
-            val url = PluginRules.expand(def.url, { state.resolve(it) }) { key ->
-                LogBuffer.addDetail("PLUGIN", "template unresolved key=$key")
-            }
-            LogBuffer.addDetail("PLUGIN", "check step=begin method=${def.method} host=${hostOf(url)}")
-            val body = def.body?.let { template ->
-                PluginRules.expand(template, { state.resolve(it) }) { key ->
-                    LogBuffer.addDetail("PLUGIN", "body template unresolved key=$key")
-                }
-            }
-            val resp = SandboxHttp.execute(
-                state.plugin, def.method, url, body = body,
-                connectTimeoutMs = state.plugin.timing.connectTimeoutMs,
-                readTimeoutMs = state.plugin.timing.readTimeoutMs,
-                headers = expandHeaders(mergeHeaders(state.plugin.headers, def.headers), state),
-            )
-            if (!resp.ok) {
-                state.reason = resp.transportError ?: "transport"
-                state.detail = resp.transportError ?: ""
-                state.outcome = Outcome.UNREACHABLE
-                LogBuffer.addDetail("PLUGIN", "check result=unreachable reason=${state.reason}")
-                return Outcome.UNREACHABLE
-            }
-            val outcome = when {
-                def.onlineContains != null && resp.body.contains(def.onlineContains) -> Outcome.ONLINE
-                def.offlineContains != null && resp.body.contains(def.offlineContains) -> Outcome.OFFLINE
-                else -> Outcome.ERROR
-            }
-            state.outcome = outcome
-            state.reason = outcome.name.lowercase()
-            LogBuffer.addDetail(
-                "PLUGIN",
-                "check result=${outcome.name.lowercase()} http=${resp.status} len=${resp.body.length}",
-            )
-            outcome
+            applyResult(state, raw)
         } catch (t: Throwable) {
-            // 插件层兜底：沙箱内任何 Error / 异常都不许抛给宿主登录逻辑
             state.reason = "plugin_error"
-            state.detail = "插件运行异常 " + t.javaClass.simpleName
+            state.detail = "插件运行异常 ${t.javaClass.simpleName}"
             state.outcome = Outcome.ERROR
-            LogBuffer.addDetail("PLUGIN", "check_fail " + android.util.Log.getStackTraceString(t))
+            LogBuffer.addDetail("PLUGIN", "runtime_fail ${t.javaClass.simpleName}")
             Outcome.ERROR
         }
     }
 
+    private fun stateJson(state: SessionState): String {
+        val o = JSONObject()
+        val inputs = JSONObject()
+        state.inputs.forEach { (k, v) -> inputs.put(k, v) }
+        o.put("inputs", inputs)
+        o.put("isp", state.ispSuffix)
+        o.put("ip", state.ip ?: "")
+        o.put("mac", state.mac)
+        o.put("rand", state.rand)
+        state.loginUrlOverride?.let { o.put("loginUrlOverride", it) }
+        return o.toString()
+    }
 
-    /** 全局默认头 + 局部头：同名（忽略大小写）以局部声明为准。 */
-    private fun mergeHeaders(base: Map<String, String>, extra: Map<String, String>): Map<String, String> {
-        if (base.isEmpty()) return extra
-        if (extra.isEmpty()) return base
-        val out = LinkedHashMap<String, String>(base)
-        extra.forEach { (k, v) ->
-            val existing = out.keys.firstOrNull { it.equals(k, true) }
-            if (existing != null) out.remove(existing)
-            out[k] = v
+    private fun applyResult(state: SessionState, raw: String): Outcome {
+        val o = try { JSONObject(raw) } catch (_: Throwable) { JSONObject() }
+        val outcome = when (o.optString("outcome")) {
+            "ONLINE" -> Outcome.ONLINE
+            "OFFLINE" -> Outcome.OFFLINE
+            "UNREACHABLE" -> Outcome.UNREACHABLE
+            "SUCCESS" -> Outcome.SUCCESS
+            "ALREADY_ONLINE" -> Outcome.ALREADY_ONLINE
+            "FAIL" -> Outcome.FAIL
+            else -> Outcome.ERROR
         }
-        return out
-    }
-
-    /** 请求头值里的 ${...} 走同一套模板解析（如 Referer 带动态 host）。 */
-    private fun expandHeaders(headers: Map<String, String>, state: SessionState): Map<String, String> {
-        if (headers.isEmpty()) return headers
-        val out = LinkedHashMap<String, String>(headers.size)
-        headers.forEach { (k, v) ->
-            out[k] = PluginRules.expand(v, { state.resolve(it) }) { key ->
-                LogBuffer.addDetail("PLUGIN", "header template unresolved key=$key")
-            }
+        state.outcome = outcome
+        state.reason = o.optString("reason", "plugin_error")
+        state.detail = o.optString("detail", "")
+        val vars = o.optJSONObject("vars")
+        if (vars != null) {
+            vars.keys().forEach { k -> state.vars[k] = vars.optString(k) }
         }
-        return out
-    }
-
-    fun login(state: SessionState): Outcome {
-        return try {
-            val plugin = state.plugin
-            var stepIndex = 0
-            plugin.loginSteps.forEach { step ->
-                val expanded = PluginRules.expand(step.url, { state.resolve(it) }) { key ->
-                    LogBuffer.addDetail("PLUGIN", "template unresolved key=$key")
-                }
-                val url = if (stepIndex == 0) applyBaseOverride(expanded, state.loginUrlOverride) else expanded
-                stepIndex++
-                LogBuffer.addDetail(
-                    "PLUGIN",
-                    "login step=${step.name} begin method=${step.method} host=${hostOf(url)}",
-                )
-                val body = step.body?.let { template ->
-                    PluginRules.expand(template, { state.resolve(it) }) { key ->
-                        LogBuffer.addDetail("PLUGIN", "body template unresolved key=$key")
-                    }
-                }
-                val resp = SandboxHttp.execute(
-                    plugin, step.method, url, body = body,
-                    connectTimeoutMs = plugin.timing.connectTimeoutMs,
-                    readTimeoutMs = plugin.timing.readTimeoutMs,
-                    headers = expandHeaders(mergeHeaders(plugin.headers, step.headers), state),
-                )
-                if (!resp.ok) {
-                    state.reason = resp.transportError ?: "transport"
-                    state.detail = resp.transportError ?: ""
-                    state.outcome = Outcome.ERROR
-                    LogBuffer.addDetail("PLUGIN", "login step=${step.name} result=error reason=${state.reason}")
-                    return Outcome.ERROR
-                }
-                step.captures.forEach { c ->
-                    val value = PluginRules.capture(c, resp.body)
-                    if (value != null) {
-                        state.vars[c.name] = value
-                        LogBuffer.addDetail("PLUGIN", "capture name=${c.name}")
-                    }
-                }
-
-                if (step.expectStatus != null && resp.status != step.expectStatus) {
-                    return failStep(state, step, resp, "http_status_${resp.status}")
-                }
-                if (step.success != null && PluginRules.matches(step.success, resp.body)) {
-                    state.outcome = Outcome.SUCCESS
-                    state.reason = "success"
-                    LogBuffer.addDetail("PLUGIN", "login step=${step.name} result=success http=${resp.status}")
-                    return Outcome.SUCCESS
-                }
-                if (step.alreadyOnline != null && PluginRules.matches(step.alreadyOnline, resp.body)) {
-                    state.outcome = Outcome.ALREADY_ONLINE
-                    state.reason = "already_online"
-                    LogBuffer.addDetail("PLUGIN", "login step=${step.name} result=already_online")
-                    return Outcome.ALREADY_ONLINE
-                }
-                if (step.success != null) {
-                    return failStep(state, step, resp, "match_failed")
-                }
-                // No explicit success rule: accept 2xx/3xx and continue to next step.
-                if (resp.status !in 200..399) {
-                    return failStep(state, step, resp, "http_status_${resp.status}")
-                }
-            }
-            state.outcome = Outcome.SUCCESS
-            state.reason = "success"
-            LogBuffer.addDetail("PLUGIN", "login result=success steps=${plugin.loginSteps.size}")
-            Outcome.SUCCESS
-        } catch (t: Throwable) {
-            // 插件层兜底：沙箱内任何 Error / 异常都不许抛给宿主登录逻辑
-            state.reason = "plugin_error"
-            state.detail = "插件运行异常 " + t.javaClass.simpleName
-            state.outcome = Outcome.ERROR
-            LogBuffer.addDetail("PLUGIN", "login_fail " + android.util.Log.getStackTraceString(t))
-            Outcome.ERROR
-        }
-    }
-
-    private fun failStep(
-        state: SessionState,
-        step: StepDef,
-        resp: SandboxHttp.Response,
-        reason: String,
-    ): Outcome {
-        val serverMsg = step.failMessageJsonPath?.let { PluginRules.jsonPath(resp.body, it) }
-        state.reason = reason
-        state.detail = serverMsg?.takeIf { it.isNotBlank() } ?: snippet(resp.body)
-        state.outcome = Outcome.FAIL
-        LogBuffer.addDetail(
-            "PLUGIN",
-            "login step=${step.name} result=fail reason=$reason msg=${state.detail}",
-        )
-        return Outcome.FAIL
-    }
-
-    private fun applyBaseOverride(url: String, base: String?): String {
-        if (base.isNullOrBlank() || base.contains("\${")) return url
-        val clean = base.substringBefore('?').substringBefore('#').trim()
-        if (clean.isBlank()) return url
-        val query = url.substringAfter('?', "")
-        return if (query.isEmpty()) clean else clean + "?" + query
-    }
-
-    private fun hostOf(url: String): String {
-        return try {
-            val uri = java.net.URI(url)
-            val port = if (uri.port >= 0) ":${uri.port}" else ""
-            "${uri.host}$port"
-        } catch (e: Exception) {
-            "na"
-        }
-    }
-
-    private fun snippet(body: String): String {
-        val b = body.trim()
-        return if (b.length <= 80) b else b.substring(0, 80)
+        LogBuffer.addDetail("PLUGIN", "runtime result=${state.reason} outcome=${outcome.name.lowercase()}")
+        return outcome
     }
 }

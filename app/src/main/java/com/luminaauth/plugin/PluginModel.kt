@@ -4,7 +4,7 @@ package com.luminaauth.plugin
  * Static data model for a YAML-defined auth plugin.
  * A plugin is pure data: there is no embedded code, so loading it cannot
  * execute anything. Runtime behaviour is fully determined by this model and
- * enforced by PluginRuntime / SandboxHttp.
+ * enforced by native plugin_engine.
  */
 data class Plugin(
     val id: String,

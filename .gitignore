@@ -4,5 +4,9 @@ build/
 .cxx/
 local.properties
 *.apk
+*.keystore
+*.jks
+*.p12
+keystore.properties
 .kotlin/
 libs-maven/

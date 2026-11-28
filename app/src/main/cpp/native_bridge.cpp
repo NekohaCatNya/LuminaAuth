@@ -5,6 +5,7 @@
 #include "log_ring_buffer.h"
 #include "fast_json.h"
 #include "native_http.h"
+#include "plugin_engine.h"
 
 #define TAG "LuminaNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
@@ -63,6 +64,43 @@ Java_com_luminaauth_NativeBridge_nativeParseDrcom(JNIEnv* env, jclass cls, jstri
     snprintf(buf, sizeof(buf), "{\"valid\":%d,\"result\":%d,\"msg\":\"%s\"}",
              res.valid ? 1 : 0, res.result, res.msg.c_str());
     return env->NewStringUTF(buf);
+}
+
+
+// 插件体系：YAML 解析、校验、check/login 全在 C++；Kotlin 只传文本与运行期状态。
+JNIEXPORT jstring JNICALL
+Java_com_luminaauth_NativeBridge_nativePluginLoad(JNIEnv* env, jclass cls,
+                                                  jstring yaml, jstring fileName, jstring source) {
+    const char* cy = env->GetStringUTFChars(yaml, nullptr);
+    const char* cf = (fileName != nullptr) ? env->GetStringUTFChars(fileName, nullptr) : "";
+    const char* cs = (source != nullptr) ? env->GetStringUTFChars(source, nullptr) : "";
+    std::string json = lumina::pluginLoadJson(std::string(cy), std::string(cf), std::string(cs));
+    env->ReleaseStringUTFChars(yaml, cy);
+    if (fileName != nullptr) env->ReleaseStringUTFChars(fileName, cf);
+    if (source != nullptr) env->ReleaseStringUTFChars(source, cs);
+    return env->NewStringUTF(json.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_luminaauth_NativeBridge_nativePluginCheck(JNIEnv* env, jclass cls,
+                                                    jstring pluginId, jstring stateJson) {
+    const char* cid = env->GetStringUTFChars(pluginId, nullptr);
+    const char* cstate = (stateJson != nullptr) ? env->GetStringUTFChars(stateJson, nullptr) : "{}";
+    std::string json = lumina::pluginCheckJson(std::string(cid), std::string(cstate));
+    env->ReleaseStringUTFChars(pluginId, cid);
+    if (stateJson != nullptr) env->ReleaseStringUTFChars(stateJson, cstate);
+    return env->NewStringUTF(json.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_luminaauth_NativeBridge_nativePluginLogin(JNIEnv* env, jclass cls,
+                                                    jstring pluginId, jstring stateJson) {
+    const char* cid = env->GetStringUTFChars(pluginId, nullptr);
+    const char* cstate = (stateJson != nullptr) ? env->GetStringUTFChars(stateJson, nullptr) : "{}";
+    std::string json = lumina::pluginLoginJson(std::string(cid), std::string(cstate));
+    env->ReleaseStringUTFChars(pluginId, cid);
+    if (stateJson != nullptr) env->ReleaseStringUTFChars(stateJson, cstate);
+    return env->NewStringUTF(json.c_str());
 }
 
 JNIEXPORT void JNICALL
